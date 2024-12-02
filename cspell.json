@@ -1,0 +1,32 @@
+{
+    "version": "0.2",
+    "language": "en,uk,ru,de",
+    "ignorePaths": [],
+    "dictionaryDefinitions": [],
+    "dictionaries": [],
+    "words": [
+        "autolinks",
+        "axios",
+        "blockquote",
+        "DTEK",
+        "genversion",
+        "gramjs",
+        "grammy",
+        "localstorage",
+        "markdownlint",
+        "megagroup",
+        "MTProto",
+        "petrovoronov",
+        "preversion",
+        "sonarjs",
+        "Svilto",
+        "svitlobot",
+        "Voronov",
+        "whatwg-url",
+        "yasno",
+        "Yasno",
+        "Обов’язковий"
+    ],
+    "ignoreWords": [],
+    "import": []
+}
