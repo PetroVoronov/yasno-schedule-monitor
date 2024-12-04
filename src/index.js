@@ -12,7 +12,8 @@ const { name: scriptName, version: scriptVersion } = require('./version');
 const i18n = require('./modules/i18n/i18n.config');
 const axios = require('axios');
 const fs = require('node:fs');
-const { utcToZonedTime, format: formatTz } = require('date-fns-tz');
+const { parse: parseDate } = require('date-fns');
+const { format: formatTz } = require('date-fns-tz');
 
 const { google } = require('googleapis');
 
@@ -108,6 +109,10 @@ async function checkForUpdates() {
   if (!currentData) {
     log.error('No data fetched or processed.');
   } else {
+
+    const targetDate = parseScheduleTargetDate(currentData.kyivData.title);
+    log.debug('Target date:', targetDate);
+
     if (previousData === null ||
       (JSON.stringify(previousData?.kyivData) !== JSON.stringify(currentData.kyivData) ||
         previousData?.lastRegistryUpdateTime !== currentData.lastRegistryUpdateTime)) {
@@ -118,12 +123,21 @@ async function checkForUpdates() {
       // Process the kievData to create intervals of hours with DEFINITE_OUTAGE
       const intervals = createOutageIntervals(currentData.kyivData.groups);
 
-      await processScheduleUpdate(intervals, currentData.lastRegistryUpdateTime);
+      await processScheduleUpdate(intervals, targetDate, currentData.lastRegistryUpdateTime);
 
     } else {
       log.info('No changes in the schedule or registry update time.');
     }
   }
+}
+
+function parseScheduleTargetDate(dateString) {
+  // Define the format of the input date string
+  const formatString = " dd.MM.yyyy 'на' HH:mm";
+
+  // Parse the date string using the specified format and locale
+  const result =  parseDate(dateString.split(',').pop(), formatString, new Date(), { locale: 'uk' });
+  return result;
 }
 
 function createOutageIntervals(kievData) {
@@ -166,8 +180,7 @@ function todaySetHour(today, hour, min = 0, sec = 0, ms = 0) {
   return formatTz(today.setHours(hour, min, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
 }
 
-async function processScheduleUpdate(intervals, registryUpdateTime) {
-  const today = new Date();
+async function processScheduleUpdate(intervals, today, registryUpdateTime) {
   const todayStr = dateToString(today);
   for (const group of groups) {
     if (!groupsSchedule[group]) {
