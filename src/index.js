@@ -111,7 +111,7 @@ async function checkForUpdates() {
   } else {
 
     const targetDate = parseScheduleTargetDate(currentData.kyivData.title);
-    log.debug('Target date:', targetDate);
+    log.debug(`Target date: ${targetDate}`);
 
     if (previousData === null ||
       (JSON.stringify(previousData?.kyivData) !== JSON.stringify(currentData.kyivData) ||
