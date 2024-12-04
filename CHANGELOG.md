@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.2.0...v0.3.0) (2024-12-04)
+
+
+### Features
+
+* enhance schedule update processing with date parsing functionality ('title' field) ([1b45d91](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/1b45d91a7d828450ab6922850ab1807b1d21393e))
+
 ## [0.2.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.1.0...v0.2.0) (2024-12-03)
 
 ### Features
