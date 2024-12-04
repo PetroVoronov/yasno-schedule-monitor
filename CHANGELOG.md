@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.3.0...v0.3.1) (2024-12-04)
+
+
+### Bug Fixes
+
+* improve logging format for target date in update checks ([25a5f15](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/25a5f1548c19cac3b10a2159199af6f1f6f7a243))
+
 ## [0.3.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.2.0...v0.3.0) (2024-12-04)
 
 ### Features
