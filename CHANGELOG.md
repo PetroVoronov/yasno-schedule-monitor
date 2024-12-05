@@ -2,22 +2,18 @@
 
 ## [0.4.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.3.1...v0.4.0) (2024-12-05)
 
-
 ### Features
 
 * **locales:** add English and Ukrainian translations for power outage notifications ([dfb2aac](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/dfb2aac2a3ed9759fca1327699d8df29e9a3a725))
 * Telegram notifications are implemented ([dfb2aac](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/dfb2aac2a3ed9759fca1327699d8df29e9a3a725))
 
-
 ### Bug Fixes
 
 * remove unnecessary condition in telegram notification logic ([1dd4109](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/1dd4109cde0e6fa06d96c3367bdceadc9027aad3))
 
-
 ### Code Refactoring
 
 * send notification only for configured groups ([eea845f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/eea845f38a898f4c633e72d8d63086563a26b1e5))
-
 
 ### Build System
 
