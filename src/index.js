@@ -180,7 +180,7 @@ function parseScheduleTargetDate(dateString) {
   const formatString = " dd.MM.yyyy 'на' HH:mm";
 
   // Parse the date string using the specified format and locale
-  const result =  parseDate(dateString.split(',').pop(), formatString, new Date(), { locale: 'uk' });
+  const result = parseDate(dateString.split(',').pop(), formatString, new Date(), { locale: 'uk' });
   return result;
 }
 
@@ -370,37 +370,41 @@ async function telegramSendUpdate(group, groupEvents) {
   groupEvents.forEach((event) => {
     message += `\n${textScheduleOutageDefiniteLine.replace('%s', event.start.dateTime.slice(11, 16)).replace('%s', event.end.dateTime.slice(11, 16))}`;
   });
-  telegramSendMessage(group, message).then((messageId) => {
-    const targetTitle = telegramTargetTitles[group];
-    const cacheIdLastMessageId = `lastMessageIdGroup${group}`;
-    const previousMessageId = cache.getItem(cacheIdLastMessageId, 'number');
-    cache.setItem(cacheIdLastMessageId, messageId);
-    if (options.pinMessage) {
-      telegramPinMessage(group, messageId)
-        .then(() => {
-          log.debug(`Telegram message with id: ${messageId} pinned to "${targetTitle}" with topic ${telegramTopicId}`);
-          if (options.unpinPrevious) {
-            if (previousMessageId !== undefined && previousMessageId !== null) {
-              telegramUnpinMessage(group, previousMessageId)
-                .then(() => {
-                  log.debug(
-                    `Telegram message with id: ${previousMessageId} unpinned from "${targetTitle}" with topic ${telegramTopicId}`,
-                  );
-                })
-                .catch((error) => {
-                  log.error(`Telegram message unpin error: ${error}`);
-                });
+  const targetTitle = telegramTargetTitles[group];
+  if (targetTitle !== undefined) {
+    telegramSendMessage(group, message).then((messageId) => {
+      const cacheIdLastMessageId = `lastMessageIdGroup${group}`;
+      const previousMessageId = cache.getItem(cacheIdLastMessageId, 'number');
+      cache.setItem(cacheIdLastMessageId, messageId);
+      if (options.pinMessage) {
+        telegramPinMessage(group, messageId)
+          .then(() => {
+            log.debug(`Telegram message with id: ${messageId} pinned to "${targetTitle}" with topic ${telegramTopicId}`);
+            if (options.unpinPrevious) {
+              if (previousMessageId !== undefined && previousMessageId !== null) {
+                telegramUnpinMessage(group, previousMessageId)
+                  .then(() => {
+                    log.debug(
+                      `Telegram message with id: ${previousMessageId} unpinned from "${targetTitle}" with topic ${telegramTopicId}`,
+                    );
+                  })
+                  .catch((error) => {
+                    log.error(`Telegram message unpin error: ${error}`);
+                  });
+              }
             }
-          }
-        })
-        .catch((error) => {
-          log.error(`Telegram message pin error: ${error}`);
-        });
-    }
-  })
-  .catch((error) => {
-    log.error(`Telegram message error: ${error}`);
-  });
+          })
+          .catch((error) => {
+            log.error(`Telegram message pin error: ${error}`);
+          });
+      }
+    })
+      .catch((error) => {
+        log.error(`Telegram message error: ${error}`);
+      });
+  } else {
+    log.debug(`Telegram is not configured for group ${group}`);
+  }
 }
 
 async function calendarUpdate(group, today) {
@@ -439,7 +443,7 @@ function getAPIAttributes() {
             .then((hash) => {
               cache.setItem('telegramApiHash', hash);
               rl.close();
-              resolve({apiID: newApiId, hash});
+              resolve({ apiID: newApiId, hash });
             })
             .catch((error) => {
               log.error(`Error: ${error}`);
@@ -453,7 +457,7 @@ function getAPIAttributes() {
           reject(error);
         });
     } else {
-      resolve({apiId, apiHash});
+      resolve({ apiId, apiHash });
     }
   });
 }
@@ -494,7 +498,7 @@ function getTelegramClient() {
         cache.setItem('telegramApiHash', process.env.TELEGRAM_API_HASH);
       }
       getAPIAttributes()
-        .then(({apiId, apiHash}) => {
+        .then(({ apiId, apiHash }) => {
           const client = new TelegramClient(storeSession, apiId, apiHash, {
             connectionRetries: 5,
             useWSS: true,
@@ -586,8 +590,8 @@ function getTelegramTargetEntity(group) {
             chatId = chatId - 1000000000000;
           }
           const availableDialogs = dialogs.filter(
-              (dialog) => dialog.entity?.migratedTo === undefined || dialog.entity?.migratedTo === null,
-            ),
+            (dialog) => dialog.entity?.migratedTo === undefined || dialog.entity?.migratedTo === null,
+          ),
             targetDialog = availableDialogs.find((item) => `${chatId}` === `${item.entity.id}`);
           if (targetDialog !== undefined) {
             telegramTargetTitles[group] =
