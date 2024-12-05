@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.1...v0.4.2) (2024-12-05)
+
+
+### Bug Fixes
+
+* update Ukrainian translation for power outage message to include placeholder ([60639ee](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/60639eecb93683c9beeeed9133b4f72a821f339e))
+
 ## [0.4.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.0...v0.4.1) (2024-12-05)
 
 ### Code Refactoring
