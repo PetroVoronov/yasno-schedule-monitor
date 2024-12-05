@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.3.1...v0.4.0) (2024-12-05)
+
+
+### Features
+
+* **locales:** add English and Ukrainian translations for power outage notifications ([dfb2aac](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/dfb2aac2a3ed9759fca1327699d8df29e9a3a725))
+* Telegram notifications are implemented ([dfb2aac](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/dfb2aac2a3ed9759fca1327699d8df29e9a3a725))
+
+
+### Bug Fixes
+
+* remove unnecessary condition in telegram notification logic ([1dd4109](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/1dd4109cde0e6fa06d96c3367bdceadc9027aad3))
+
+
+### Code Refactoring
+
+* send notification only for configured groups ([eea845f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/eea845f38a898f4c633e72d8d63086563a26b1e5))
+
+
+### Build System
+
+* **deps:** bump axios from 1.7.8 to 1.7.9 ([1900c0b](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/1900c0babcb2d3f8987441770e93b826403a9946))
+* **deps:** bump grammy from 1.32.0 to 1.33.0 ([891d45d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/891d45d55aa5641c2e74e062ce81bcc85a7f2165))
+
 ## [0.3.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.3.0...v0.3.1) (2024-12-04)
 
 ### Bug Fixes
