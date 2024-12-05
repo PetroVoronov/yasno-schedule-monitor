@@ -417,7 +417,7 @@ async function calendarUpdate(group, today) {
   log.debug('Events to add:', stringify(eventsToAdd));
   await calendarEventsDelete(calendar, auth, calendarId, eventsToDelete);
   await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd);
-  if (eventsToDelete.length > 0 || eventsToAdd.length > 0 || true) {
+  if (eventsToDelete.length > 0 || eventsToAdd.length > 0) {
     await telegramSendUpdate(group, eventsNew);
   }
 }
