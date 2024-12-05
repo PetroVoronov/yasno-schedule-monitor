@@ -292,9 +292,9 @@ async function getCalendarEvents(calendar, auth, calendarId, today) {
 }
 
 
-function prepareCalendarEvent(today, interval) {
+function prepareCalendarEvent(group, today, interval) {
   return {
-    summary: calendarEventSummary,
+    summary: calendarEventSummary.replace('%s', group),
     description: calendarEventDescription,
     start: {
       dateTime: todaySetHour(today, interval.start),
@@ -307,10 +307,10 @@ function prepareCalendarEvent(today, interval) {
   }
 }
 
-function prepareCalendarEvents(today, intervals) {
+function prepareCalendarEvents(group, today, intervals) {
   const events = [];
   for (const interval of intervals) {
-    events.push(prepareCalendarEvent(today, interval));
+    events.push(prepareCalendarEvent(group, today, interval));
   }
   return events;
 }
@@ -414,7 +414,7 @@ async function calendarUpdate(group, today) {
   const events = await getCalendarEvents(calendar, auth, calendarId, today);
   log.debug('Events:', stringify(events));
   const groupSchedule = groupsSchedule[group];
-  const eventsNew = prepareCalendarEvents(today, groupSchedule.schedule);
+  const eventsNew = prepareCalendarEvents(group, today, groupSchedule.schedule);
   log.debug('Events new:', stringify(eventsNew));
   const { eventsToDelete, eventsToAdd } = compareCalendarEvents(events, eventsNew);
   log.debug('Events to delete:', stringify(eventsToDelete));
