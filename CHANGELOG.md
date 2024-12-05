@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.0...v0.4.1) (2024-12-05)
+
+### Code Refactoring
+
+* update calendar event summary - number of group is added ([e5ef1f4](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/e5ef1f49a0d674f4e809ee94906d84e691aeb074))
+
 ## [0.4.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.3.1...v0.4.0) (2024-12-05)
 
 ### Features
