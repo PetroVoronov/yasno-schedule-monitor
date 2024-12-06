@@ -1,8 +1,8 @@
 {
-	"Power outage": "Відключення електроенергії. Група %s",
-	"Planned power outage by information from Yasno.com.ua": "Планове відключення електроенергії за інформацією з Yasno.com.ua",
-	"Schedule for %s has been updated by Yasno.com.ua": "Розклад на %s було оновлено Yasno.com.ua",
+	"Power outage. Group {group}": "Відключення електроенергії. Група {group}",
+	"Planned power outage by information from {url}, on {timestamp}": "Планове відключення електроенергії за інформацією з {url}, станом на {timestamp}",
+	"Schedule for {today} ({date}) has been updated": "Розклад на {today} ({date}) було оновлено",
 	"today": "сьогодні",
 	"tomorrow": "завтра",
-	"- off: %s - %s": "- 🕯 : %s - %s"
+	"- off: {start} - {end}": "- 🕯 : {start} - {end}"
 }

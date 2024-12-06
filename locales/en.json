@@ -1,8 +1,8 @@
 {
-	"Power outage": "Power outage",
-	"Planned power outage by information from Yasno.com.ua": "Planned power outage by information from Yasno.com.ua",
-	"Schedule for %s has been updated by Yasno.com.ua": "Schedule for %s has been updated by Yasno.com.ua",
+	"Power outage. Group {group}": "Power outage. Group {group}",
+	"Planned power outage by information from {url}, on {timestamp}": "Planned power outage by information from {url}, on {timestamp}",
+	"Schedule for {today} ({date}) has been updated": "Schedule for {today} ({date}) has been updated",
 	"today": "today",
 	"tomorrow": "tomorrow",
-	"- off: %s - %s": "- off: %s - %s"
+	"- off: {start} - {end}": "- 🕯 : {start} - {end}"
 }

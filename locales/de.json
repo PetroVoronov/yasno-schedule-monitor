@@ -1,1 +1,8 @@
-{}
+{
+    "Power outage. Group {group}": "Stromausfall. Gruppe {group}",
+    "Planned power outage by information from {url}, on {timestamp}": "Geplante Stromabschaltung laut Informationen von {url}, am {timestamp}",
+    "Schedule for {today} ({date}) has been updated": "Zeitplan für {today} ({date}) wurde aktualisiert",
+    "today": "heute",
+    "tomorrow": "morgen",
+	"- off: {start} - {end}": "- 🕯 : {start} - {end}"
+}

@@ -12,11 +12,11 @@ const { name: scriptName, version: scriptVersion } = require('./version');
 const i18n = require('./modules/i18n/i18n.config');
 const axios = require('axios');
 const fs = require('node:fs');
-const { parse: parseDate } = require('date-fns');
+const { parse: parseDate} = require('date-fns');
 const { toZonedTime, format: formatTz } = require('date-fns-tz');
-
+const template = require('string-template');
 const { google } = require('googleapis');
-const { group } = require('node:console');
+const { url } = require('node:inspector');
 
 // i18n.setLocale(options.language);
 
@@ -77,6 +77,7 @@ log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
 
 
 const yasnoApiUrl = 'https://api.yasno.com.ua/api/v1/pages/home/schedule-turn-off-electricity';
+const yasnoMainUrl = 'https://yasno.com.ua';
 let previousData = null;
 
 const storage = new LocalStorage('data/storage');
@@ -90,14 +91,14 @@ const keyFilePath = 'data/yasno-monitor.json'; // path to JSON with private key 
 const calendarScope = 'https://www.googleapis.com/auth/calendar'; // authorization scopes
 const calendarEventsScope = 'https://www.googleapis.com/auth/calendar.events';
 
-const calendarEventSummary = i18n.__('Power outage');
-const calendarEventDescription = i18n.__('Planned power outage by information from Yasno.com.ua');
+const calendarEventSummary = i18n.__('Power outage. Group {group}');
+const calendarEventDescription = i18n.__('Planned power outage by information from {url}, on {timestamp}');
 
 
-const textScheduleUpdated = i18n.__('Schedule for %s has been updated by Yasno.com.ua');
+const textScheduleUpdated = i18n.__('Schedule for {today} ({date}) has been updated');
 const textToday = i18n.__('today');
 const textTomorrow = i18n.__('tomorrow');
-const textScheduleOutageDefiniteLine = i18n.__('- off: %s - %s');
+const textScheduleOutageDefiniteLine = i18n.__('- off: {start} - {end}');
 
 let textTelegramMessageHeader = '';
 
@@ -221,14 +222,15 @@ function dateToString(date) {
 }
 
 function todaySetHour(today, hour, min = 0, sec = 0, ms = 0) {
-  return formatTz(today.setHours(hour, min, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
+  const date = toZonedTime(new Date(), timeZone);
+  return formatTz(date.setHours(hour, min, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
 }
 
 async function processScheduleUpdate(intervals, today, registryUpdateTime) {
   const todayStr = dateToString(today);
   const now = toZonedTime(new Date(), timeZone);
   const textForData = today.getDay() === now.getDay() ? textToday : textTomorrow;
-  textTelegramMessageHeader = textScheduleUpdated.replace('%s', textForData);
+  textTelegramMessageHeader = template(textScheduleUpdated, {today: textForData, date: todayStr});
   for (const group of groups) {
     if (!groupsSchedule[group]) {
       groupsSchedule[group] = {};
@@ -293,9 +295,10 @@ async function getCalendarEvents(calendar, auth, calendarId, today) {
 
 
 function prepareCalendarEvent(group, today, interval) {
+  const timestamp = formatTz(today, "dd.MM.yyyy HH:mm", { timeZone });
   return {
-    summary: calendarEventSummary.replace('%s', group),
-    description: calendarEventDescription,
+    summary: template(calendarEventSummary, {group}),
+    description: template(calendarEventDescription, {timestamp, url: yasnoMainUrl}),
     start: {
       dateTime: todaySetHour(today, interval.start),
       timeZone: timeZone
@@ -368,7 +371,9 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
 async function telegramSendUpdate(group, groupEvents) {
   let message = textTelegramMessageHeader;
   groupEvents.forEach((event) => {
-    message += `\n${textScheduleOutageDefiniteLine.replace('%s', event.start.dateTime.slice(11, 16)).replace('%s', event.end.dateTime.slice(11, 16))}`;
+    message += `\n${
+        template(textScheduleOutageDefiniteLine, {start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16)})
+      }`;
   });
   const targetTitle = telegramTargetTitles[group];
   if (targetTitle !== undefined) {
