@@ -12,7 +12,7 @@ const { name: scriptName, version: scriptVersion } = require('./version');
 const i18n = require('./modules/i18n/i18n.config');
 const axios = require('axios');
 const fs = require('node:fs');
-const { parse: parseDate} = require('date-fns');
+const { parse: parseDate } = require('date-fns');
 const { toZonedTime, format: formatTz } = require('date-fns-tz');
 const template = require('string-template');
 const { google } = require('googleapis');
@@ -69,7 +69,7 @@ log.info(`Language: ${options.language}`);
 log.info(`Schedule update interval: ${options.scheduleUpdateInterval} minutes`);
 log.info(`Debug: ${options.debug}`);
 
-const groups = [1, 2, 3, 4, 5, 6];
+const groups = [];
 const groupsSchedule = {};
 
 log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
@@ -113,7 +113,7 @@ const botAuthTokenMinimumLength = 43;
 
 const telegramParseMode = 'html';
 
-groups.forEach((group) => {
+for (let group = 1; group <= 6; group++) {
   if (typeof process.env[`CALENDAR_ID_GROUP_${group}`] === 'string' && process.env[`CALENDAR_ID_GROUP_${group}`].length > 0) {
     cache.setItem(`calendarIdGroup${group}`, process.env[`CALENDAR_ID_GROUP_${group}`]);
   }
@@ -123,7 +123,10 @@ groups.forEach((group) => {
   if (typeof process.env[`TELEGRAM_TOPIC_ID_GROUP_${group}`] === 'string' && process.env[`TELEGRAM_TOPIC_ID_GROUP_${group}`].length > 0) {
     cache.setItem(`telegramTopicIdGroup${group}`, parseInt(process.env[`TELEGRAM_TOPIC_ID_GROUP_${group}`]));
   }
-});
+  if (typeof cache.getItem(`calendarIdGroup${group}`) === 'string' && cache.getItem(`calendarIdGroup${group}`).length > 0) {
+    groups.push(group);
+  }
+};
 
 
 async function checkForUpdates() {
@@ -230,7 +233,7 @@ async function processScheduleUpdate(intervals, today, registryUpdateTime) {
   const todayStr = dateToString(today);
   const now = toZonedTime(new Date(), timeZone);
   const textForData = today.getDay() === now.getDay() ? textToday : textTomorrow;
-  textTelegramMessageHeader = template(textScheduleUpdated, {today: textForData, date: todayStr});
+  textTelegramMessageHeader = template(textScheduleUpdated, { today: textForData, date: todayStr });
   for (const group of groups) {
     if (!groupsSchedule[group]) {
       groupsSchedule[group] = {};
@@ -297,8 +300,8 @@ async function getCalendarEvents(calendar, auth, calendarId, today) {
 function prepareCalendarEvent(group, today, interval) {
   const timestamp = formatTz(today, "dd.MM.yyyy HH:mm", { timeZone });
   return {
-    summary: template(calendarEventSummary, {group}),
-    description: template(calendarEventDescription, {timestamp, url: yasnoMainUrl}),
+    summary: template(calendarEventSummary, { group }),
+    description: template(calendarEventDescription, { timestamp, url: yasnoMainUrl }),
     start: {
       dateTime: todaySetHour(today, interval.start),
       timeZone: timeZone
@@ -371,8 +374,7 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
 async function telegramSendUpdate(group, groupEvents) {
   let message = textTelegramMessageHeader;
   groupEvents.forEach((event) => {
-    message += `\n${
-        template(textScheduleOutageDefiniteLine, {start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16)})
+    message += `\n${template(textScheduleOutageDefiniteLine, { start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16) })
       }`;
   });
   const targetTitle = telegramTargetTitles[group];
@@ -569,89 +571,90 @@ function getTelegramTargetEntity(group) {
   return new Promise((resolve, reject) => {
     const telegramChatId = cache.getItem(`telegramChatIdGroup${group}`, 'number');
     const telegramTopicId = cache.getItem(`telegramTopicIdGroup${group}`, 'number');
-    if (typeof telegramChatId !== 'number') {
-      log.error(`Telegram chat ID for group ${group} is not valid!`);
-      reject(new Error(`Telegram chat ID for group ${group} is not valid!`));
-    }
-    if (options.asUser === false) {
-      telegramClient
-        .getChat(telegramChatId)
-        .then((entity) => {
-          telegramTargetTitles[group] = entity.title || `${entity.first_name || ''} ${entity.last_name || ''} (${entity.username || ''})`;
-          log.debug(`Telegram chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
-          telegramTargetEntities[group] = entity;
-          resolve();
-        })
-        .catch((error) => {
-          log.warn(`Telegram chat with ID ${telegramChatId} not found! Error: ${error}`);
-          reject(error);
-        });
+    if (typeof telegramChatId !== 'number' || telegramChatId == 0) {
+      log.warn(`Telegram chat ID for group ${group} is not valid! No notification will be sent!`);
+      resolve();
     } else {
-      telegramClient
-        .getDialogs()
-        .then((dialogs) => {
-          let chatId = telegramChatId > 0 ? telegramChatId : -telegramChatId;
-          if (chatId > 1000000000000) {
-            chatId = chatId - 1000000000000;
-          }
-          const availableDialogs = dialogs.filter(
-            (dialog) => dialog.entity?.migratedTo === undefined || dialog.entity?.migratedTo === null,
-          ),
-            targetDialog = availableDialogs.find((item) => `${chatId}` === `${item.entity.id}`);
-          if (targetDialog !== undefined) {
-            telegramTargetTitles[group] =
-              targetDialog.entity.title ||
-              `${targetDialog.entity.firstName || ''} ${targetDialog.entity.lastName || ''} (${targetDialog.entity.username || ''})`;
-            if (telegramTopicId > 0) {
-              telegramClient
-                .invoke(
-                  new Api.channels.GetForumTopics({
-                    channel: targetDialog.entity,
-                    limit: 100,
-                    offsetId: 0,
-                    offsetDate: 0,
-                    addOffset: 0,
-                  }),
-                )
-                .then((response) => {
-                  if (Array.isArray(response.topics) && response.topics.length > 0) {
-                    // eslint-disable-next-line sonarjs/no-nested-functions
-                    const targetTopic = response.topics.find((topic) => topic.id === telegramTopicId);
-                    if (targetTopic) {
-                      log.debug(`Telegram topic "${targetTopic.title}" in chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
-                      telegramTargetEntities[group] = targetDialog.entity;
-                      resolve();
-                    } else {
-                      log.warn(`Topic with id ${telegramTopicId} not found in "${telegramTargetTitles[group]}" (${telegramChatId})!`);
-                      reject(new Error(`Topic with id ${telegramTopicId} not found in "${telegramTargetTitles[group]}" (${telegramChatId})!`));
-                    }
-                  } else {
-                    log.warn(`No topics found in "${telegramTargetTitles[group]}" (${telegramChatId})!`);
-                    reject(new Error(`No topics found in "${telegramTargetTitles[group]}" (${telegramChatId})!`));
-                  }
-                })
-                .catch((error) => {
-                  reject(error);
-                });
-            } else {
-              log.debug(`Telegram chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
-              telegramTargetEntities[group] = targetDialog.entity;
-              resolve();
+      if (options.asUser === false) {
+        telegramClient
+          .getChat(telegramChatId)
+          .then((entity) => {
+            telegramTargetTitles[group] = entity.title || `${entity.first_name || ''} ${entity.last_name || ''} (${entity.username || ''})`;
+            log.debug(`Telegram chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
+            telegramTargetEntities[group] = entity;
+            resolve();
+          })
+          .catch((error) => {
+            log.warn(`Telegram chat with ID ${telegramChatId} not found! Error: ${error}`);
+            reject(error);
+          });
+      } else {
+        telegramClient
+          .getDialogs()
+          .then((dialogs) => {
+            let chatId = telegramChatId > 0 ? telegramChatId : -telegramChatId;
+            if (chatId > 1000000000000) {
+              chatId = chatId - 1000000000000;
             }
-          } else {
-            reject(new Error(`Telegram chat with ID ${telegramChatId} not found`));
-          }
-        })
-        .catch((error) => {
-          reject(error);
-        });
+            const availableDialogs = dialogs.filter(
+              (dialog) => dialog.entity?.migratedTo === undefined || dialog.entity?.migratedTo === null,
+            ),
+              targetDialog = availableDialogs.find((item) => `${chatId}` === `${item.entity.id}`);
+            if (targetDialog !== undefined) {
+              telegramTargetTitles[group] =
+                targetDialog.entity.title ||
+                `${targetDialog.entity.firstName || ''} ${targetDialog.entity.lastName || ''} (${targetDialog.entity.username || ''})`;
+              if (telegramTopicId > 0) {
+                telegramClient
+                  .invoke(
+                    new Api.channels.GetForumTopics({
+                      channel: targetDialog.entity,
+                      limit: 100,
+                      offsetId: 0,
+                      offsetDate: 0,
+                      addOffset: 0,
+                    }),
+                  )
+                  .then((response) => {
+                    if (Array.isArray(response.topics) && response.topics.length > 0) {
+                      // eslint-disable-next-line sonarjs/no-nested-functions
+                      const targetTopic = response.topics.find((topic) => topic.id === telegramTopicId);
+                      if (targetTopic) {
+                        log.debug(`Telegram topic "${targetTopic.title}" in chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
+                        telegramTargetEntities[group] = targetDialog.entity;
+                        resolve();
+                      } else {
+                        log.warn(`Topic with id ${telegramTopicId} not found in "${telegramTargetTitles[group]}" (${telegramChatId})!`);
+                        reject(new Error(`Topic with id ${telegramTopicId} not found in "${telegramTargetTitles[group]}" (${telegramChatId})!`));
+                      }
+                    } else {
+                      log.warn(`No topics found in "${telegramTargetTitles[group]}" (${telegramChatId})!`);
+                      reject(new Error(`No topics found in "${telegramTargetTitles[group]}" (${telegramChatId})!`));
+                    }
+                  })
+                  .catch((error) => {
+                    reject(error);
+                  });
+              } else {
+                log.debug(`Telegram chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
+                telegramTargetEntities[group] = targetDialog.entity;
+                resolve();
+              }
+            } else {
+              reject(new Error(`Telegram chat with ID ${telegramChatId} not found`));
+            }
+          })
+          .catch((error) => {
+            reject(error);
+          });
+      }
     }
   });
 }
 
 function telegramSendMessage(group, messageText) {
   return new Promise((resolve, reject) => {
-    if (telegramClient !== null) {
+    if (telegramClient !== null && telegramTargetEntities[group] !== undefined) {
       let telegramMessage;
       let telegramTarget;
       let messageOptions;

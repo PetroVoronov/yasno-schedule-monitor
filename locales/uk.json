@@ -1,5 +1,5 @@
 {
-	"Power outage. Group {group}": "Відключення електроенергії. Група {group}",
+	"Power outage. Group {group}": "Група {group}. Відключення електроенергії",
 	"Planned power outage by information from {url}, on {timestamp}": "Планове відключення електроенергії за інформацією з {url}, станом на {timestamp}",
 	"Schedule for {today} ({date}) has been updated": "Розклад на {today} ({date}) було оновлено",
 	"today": "сьогодні",
