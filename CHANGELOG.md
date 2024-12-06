@@ -2,11 +2,9 @@
 
 ## [0.4.5](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.4...v0.4.5) (2024-12-06)
 
-
 ### Bug Fixes
 
 * **i18n:** update Ukrainian translation for power outage message ([fe2cfb4](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/fe2cfb4a75902960d57f860b72889fff1375fe08))
-
 
 ### Code Refactoring
 
