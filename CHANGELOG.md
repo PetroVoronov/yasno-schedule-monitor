@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.3](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.2...v0.4.3) (2024-12-06)
+
+### Code Refactoring
+
+* text for events and messages ([5218402](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5218402dc136f095cf94b7b4b0897ebf31c79a4d))
+
 ## [0.4.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.1...v0.4.2) (2024-12-05)
 
 ### Bug Fixes
