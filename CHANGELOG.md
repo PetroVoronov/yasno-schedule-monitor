@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.3...v0.4.4) (2024-12-06)
+
+
+### Code Refactoring
+
+* all groups added ([123923e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/123923e15832a9c1484480335465ab6a554e3459))
+
 ## [0.4.3](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.2...v0.4.3) (2024-12-06)
 
 ### Code Refactoring
