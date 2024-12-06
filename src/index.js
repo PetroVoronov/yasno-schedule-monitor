@@ -69,7 +69,7 @@ log.info(`Language: ${options.language}`);
 log.info(`Schedule update interval: ${options.scheduleUpdateInterval} minutes`);
 log.info(`Debug: ${options.debug}`);
 
-const groups = [1];
+const groups = [1, 2, 3, 4, 5, 6];
 const groupsSchedule = {};
 
 log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
