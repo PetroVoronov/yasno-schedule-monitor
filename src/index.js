@@ -114,18 +114,39 @@ const botAuthTokenMinimumLength = 43;
 const telegramParseMode = 'html';
 
 for (let group = 1; group <= 6; group++) {
-  if (typeof process.env[`CALENDAR_ID_GROUP_${group}`] === 'string' && process.env[`CALENDAR_ID_GROUP_${group}`].length > 0) {
-    cache.setItem(`calendarIdGroup${group}`, process.env[`CALENDAR_ID_GROUP_${group}`]);
+  const oldCalendarId = cache.getItem(`calendarIdGroup${group}`);
+  if (typeof oldCalendarId === 'string' && oldCalendarId.length > 0) {
+    cache.setItem(`calendarIdGroup${group}.1`, oldCalendarId);
+    cache.removeItem(`calendarIdGroup${group}`);
   }
-  if (typeof process.env[`TELEGRAM_CHAT_ID_GROUP_${group}`] === 'string' && process.env[`TELEGRAM_CHAT_ID_GROUP_${group}`].length > 0) {
-    cache.setItem(`telegramChatIdGroup${group}`, parseInt(process.env[`TELEGRAM_CHAT_ID_GROUP_${group}`]));
+  const oldTelegramChatId = cache.getItem(`telegramChatIdGroup${group}`);
+  if (typeof oldTelegramChatId === 'number' && oldTelegramChatId !== 0) {
+    cache.setItem(`telegramChatIdGroup${group}.1`, oldTelegramChatId);
+    cache.removeItem(`telegramChatIdGroup${group}`);
   }
-  if (typeof process.env[`TELEGRAM_TOPIC_ID_GROUP_${group}`] === 'string' && process.env[`TELEGRAM_TOPIC_ID_GROUP_${group}`].length > 0) {
-    cache.setItem(`telegramTopicIdGroup${group}`, parseInt(process.env[`TELEGRAM_TOPIC_ID_GROUP_${group}`]));
+  const oldTelegramTopicId = cache.getItem(`telegramTopicIdGroup${group}`);
+  if (typeof oldTelegramTopicId === 'number' && oldTelegramTopicId >= 0) {
+    cache.setItem(`telegramTopicIdGroup${group}.1`, oldTelegramTopicId);
+    cache.removeItem(`telegramTopicIdGroup${group}`);
   }
-  if (typeof cache.getItem(`calendarIdGroup${group}`) === 'string' && cache.getItem(`calendarIdGroup${group}`).length > 0) {
-    groups.push(group);
+  for (let subGroup = 1; subGroup <= 2; subGroup++) {
+    const envId = `${group}_${subGroup}`;
+    const groupId = `${group}.${subGroup}`;
+    if (typeof process.env[`CALENDAR_ID_GROUP_${envId}`] === 'string' && process.env[`CALENDAR_ID_GROUP_${envId}`].length > 0) {
+      cache.setItem(`calendarIdGroup${groupId}`, process.env[`CALENDAR_ID_GROUP_${envId}`]);
+    }
+    if (typeof process.env[`TELEGRAM_CHAT_ID_GROUP_${envId}`] === 'string' && process.env[`TELEGRAM_CHAT_ID_GROUP_${envId}`].length > 0) {
+      cache.setItem(`telegramChatIdGroup${groupId}`, parseInt(process.env[`TELEGRAM_CHAT_ID_GROUP_${envId}`]));
+    }
+    if (typeof process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`] === 'string' && process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`].length > 0) {
+      cache.setItem(`telegramTopicIdGroup${groupId}`, parseInt(process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`]));
+    }
+    const calendarId = cache.getItem(`calendarIdGroup${groupId}`);
+    if (typeof calendarId === 'string' && calendarId.length > 0) {
+      groups.push(groupId);
+    }
   }
+
 };
 
 
@@ -226,13 +247,22 @@ function dateToString(date) {
 
 function todaySetHour(today, hour, min = 0, sec = 0, ms = 0) {
   const date = toZonedTime(new Date(), timeZone);
-  return formatTz(date.setHours(hour, min, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
+  const halfHour = hour % 1;
+  if (halfHour === 0) {
+    return formatTz(date.setHours(hour, min, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
+  }
+  else {
+    const nextHour = Math.floor(hour);
+    const nextMin = halfHour * 60;
+    return formatTz(date.setHours(nextHour, nextMin, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
+  }
 }
 
 async function processScheduleUpdate(intervals, today, registryUpdateTime) {
   const todayStr = dateToString(today);
   const now = toZonedTime(new Date(), timeZone);
   const textForData = today.getDay() === now.getDay() ? textToday : textTomorrow;
+  const scheduleUpdate = Math.floor(today.getTime() / 1000);
   textTelegramMessageHeader = template(textScheduleUpdated, { today: textForData, date: todayStr });
   for (const group of groups) {
     if (!groupsSchedule[group]) {
@@ -243,12 +273,12 @@ async function processScheduleUpdate(intervals, today, registryUpdateTime) {
       if (dateToString(schedule.today) !== todayStr) {
         schedule.today = today;
         schedule.schedule = [];
-        schedule.updated = Math.floor(today.getTime() / 1000)
+        schedule.updated = scheduleUpdate;
       }
     } else {
       schedule.today = today;
       schedule.schedule = [];
-      schedule.updated = Math.floor(today.getTime() / 1000)
+      schedule.updated = scheduleUpdate;
     }
     if (intervals[group]) {
       if (stringify(schedule.schedule) !== stringify(intervals[group])) {
@@ -415,14 +445,14 @@ async function telegramSendUpdate(group, groupEvents) {
 }
 
 async function calendarUpdate(group, today) {
+  const groupSchedule = groupsSchedule[group];
+  const eventsNew = prepareCalendarEvents(group, today, groupSchedule.schedule);
+  log.debug('Events new:', stringify(eventsNew));
   const auth = await authenticateToCalendar(await readPrivateKey());
   const calendar = google.calendar('v3');
   const calendarId = cache.getItem(`calendarIdGroup${group}`);
   const events = await getCalendarEvents(calendar, auth, calendarId, today);
   log.debug('Events:', stringify(events));
-  const groupSchedule = groupsSchedule[group];
-  const eventsNew = prepareCalendarEvents(group, today, groupSchedule.schedule);
-  log.debug('Events new:', stringify(eventsNew));
   const { eventsToDelete, eventsToAdd } = compareCalendarEvents(events, eventsNew);
   log.debug('Events to delete:', stringify(eventsToDelete));
   log.debug('Events to add:', stringify(eventsToAdd));
