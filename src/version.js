@@ -1,2 +1,2 @@
 exports.name = 'yasno-schedule-monitor'
-exports.version = '0.4.5' // x-release-please-version
+exports.version = '0.5.0' // x-release-please-version

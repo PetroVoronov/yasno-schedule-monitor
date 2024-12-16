@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.5...v0.5.0) (2024-12-16)
+
+### Features
+
+* Updated to work with sub groups ([6b081da](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/6b081da97687520a3fa71ff94e3bd2cd70894069))
+
+### Build System
+
+* **deps-dev:** bump markdownlint-cli2 from 0.15.0 to 0.16.0 ([c8448ef](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/c8448ef5ef7477e4702e125b582dbd34659ac916))
+
 ## [0.4.5](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.4...v0.4.5) (2024-12-06)
 
 ### Bug Fixes
