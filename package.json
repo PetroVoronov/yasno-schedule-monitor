@@ -1,6 +1,6 @@
 {
   "name": "yasno-schedule-monitor",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "There is a tool to monitor the Yasno API to detect changes in power outage schedule changes",
   "main": "src/index.js",
   "keywords": [

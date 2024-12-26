@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.5.0...v0.6.0) (2024-12-26)
+
+### Features
+
+* add "no outages!" message in case of "empty" schedule and update localization files ([38dd967](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/38dd967f5918257c776b33c071a628b4cd1d493f))
+
+### Build System
+
+* **deps-dev:** bump globals from 15.13.0 to 15.14.0 ([372b69c](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/372b69ca02c847c7e34a0b039514bf93ebbf5ec5))
+* **deps-dev:** bump markdownlint-cli2 from 0.16.0 to 0.17.0 ([32ade2d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/32ade2de77e7a730898439dc44a4d6158d8fec60))
+* **deps:** bump telegram from 2.26.8 to 2.26.12 ([6779928](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/67799283efcef345f7083a2a6bd1dd6a5b2ebe17))
+
 ## [0.5.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.4.5...v0.5.0) (2024-12-16)
 
 ### Features
