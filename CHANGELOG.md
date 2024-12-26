@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.6.0...v0.6.1) (2024-12-26)
+
+
+### Code Refactoring
+
+* **logging:** replace SecuredLogger implementation with `logform` and `triple-beam` due to the `gramjs` Logger extension no more exported ([e0cfb56](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/e0cfb5671aec3e6a98a3dc677e18df8253fa2393))
+
 ## [0.6.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.5.0...v0.6.0) (2024-12-26)
 
 ### Features
