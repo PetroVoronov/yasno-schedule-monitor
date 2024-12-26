@@ -4,5 +4,6 @@
 	"Schedule for {today} ({date}) has been updated": "Розклад на {today} ({date}) було оновлено",
 	"today": "сьогодні",
 	"tomorrow": "завтра",
-	"- off: {start} - {end}": "- 🕯 : {start} - {end}"
+	"- off: {start} - {end}": "- 🕯 : {start} - {end}",
+	"no outages!": "без відключень!"
 }

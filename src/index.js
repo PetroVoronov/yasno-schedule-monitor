@@ -402,11 +402,15 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
 
 
 async function telegramSendUpdate(group, groupEvents) {
-  let message = textTelegramMessageHeader;
-  groupEvents.forEach((event) => {
-    message += `\n${template(textScheduleOutageDefiniteLine, { start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16) })
-      }`;
-  });
+  let message = textTelegramMessageHeader + ':';
+  if (groupEvents.length === 0) {
+    message += `\n${i18n.__('no outages!')}`;
+  } else {
+    groupEvents.forEach((event) => {
+      message += `\n${template(textScheduleOutageDefiniteLine, { start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16) })
+        }`;
+    });
+  }
   const targetTitle = telegramTargetTitles[group];
   if (targetTitle !== undefined) {
     telegramSendMessage(group, message).then((messageId) => {

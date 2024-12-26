@@ -4,5 +4,6 @@
     "Schedule for {today} ({date}) has been updated": "Zeitplan für {today} ({date}) wurde aktualisiert",
     "today": "heute",
     "tomorrow": "morgen",
-	"- off: {start} - {end}": "- 🕯 : {start} - {end}"
+	"- off: {start} - {end}": "- 🕯 : {start} - {end}",
+    "no outages!": "keine Ausfälle!"
 }
