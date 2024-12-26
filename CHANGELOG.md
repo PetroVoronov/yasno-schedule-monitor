@@ -2,11 +2,9 @@
 
 ## [0.6.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.5.0...v0.6.0) (2024-12-26)
 
-
 ### Features
 
 * add "no outages!" message in case of "empty" schedule and update localization files ([38dd967](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/38dd967f5918257c776b33c071a628b4cd1d493f))
-
 
 ### Build System
 
