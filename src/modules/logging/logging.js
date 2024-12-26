@@ -1,9 +1,9 @@
-const {Logger} = require('telegram/extensions/Logger');
-class SecuredLogger extends Logger {
-  constructor(...args) {
-    super(...args);
-    this.maskCharactersVisible = 3;
-  }
+const {LEVEL, MESSAGE} = require('triple-beam');
+const {format} = require('logform');
+const {combine, timestamp, colorize, printf} = format;
+
+class SecuredLogger {
+  maskCharactersVisible = 3;
   maskWords = [
     'token',
     'secret',
@@ -21,44 +21,27 @@ class SecuredLogger extends Logger {
     'bearer',
   ];
 
-  _log(level, message, color) {
-    if (this.canSend(level)) {
-      if (typeof message === 'string') {
-        super._log(level, message, color);
-      } else if (Array.isArray(message)) {
-        const messageText = message.map((item) => this.processMessageObject(item)).join('');
-        super._log(level, messageText, color);
-      }
-    }
+  levels = {
+    debug: 'cyan',
+    info: 'yellow',
+    warn: 'magenta',
+    error: 'red',
+  };
+
+  constructor(level = 'info') {
+    this.level = level;
+    this.formatter = combine(
+      timestamp({format: 'YYYY-MM-DD' + 'T' + 'HH:mm:ss.SSS' /* myTimeFormat */}),
+      printf(({level, message, timestamp}) => `[${timestamp}] [${level}] - [${message}]`),
+      colorize({all: true, colors: this.levels}),
+    );
   }
 
-  processMessageObject(message) {
-    if (typeof message === 'object') {
-      return Object.entries(message)
-        .map(([key, value]) => this.processMessageItem(key, value))
-        .join(', ');
+  setLevel(level) {
+    if (!Object.keys(this.levels).includes(level)) {
+      throw new Error(`Invalid log level: ${level}`);
     } else {
-      return message;
-    }
-  }
-
-  maskString(value) {
-    if (typeof value !== 'string') {
-      return value;
-    } else {
-      let visibleLength = this.maskCharactersVisible;
-      if ((value.startsWith(`"`) && value.endsWith(`"`)) || (value.startsWith(`'`) && value.endsWith(`'`))) {
-        visibleLength += 1;
-      }
-      if (value.length < visibleLength * 2) {
-        return '*'.repeat(value.length);
-      } else if (value.length < visibleLength * 3) {
-        return value.substring(0, visibleLength) + '*'.repeat(value.length - visibleLength);
-      } else {
-        return (
-          value.substring(0, visibleLength) + '*'.repeat(value.length - visibleLength * 2) + value.substring(value.length - visibleLength)
-        );
-      }
+      this.level = level;
     }
   }
 
@@ -78,6 +61,57 @@ class SecuredLogger extends Logger {
 
   removeMaskWord(...value) {
     this.maskWords = this.maskWords.filter((word) => !value.map((item) => item.toLowerCase()).includes(word));
+  }
+
+  canSend(level) {
+    return (
+      Object.keys(this.levels).includes(level) && Object.keys(this.levels).indexOf(level) >= Object.keys(this.levels).indexOf(this.level)
+    );
+  }
+
+  log(level, message) {
+    if (this.canSend(level)) {
+      let messageText = message;
+      if (typeof messageText === 'string') {
+        super._log(level, message, color);
+      } else if (Array.isArray(message)) {
+        messageText = message.reduce((acc, item) => {
+          return `${acc}${this.processMessageObject(item)}`;
+        }, '');
+      }
+      if (typeof messageText === 'string') {
+        console.log(this.formatter.transform({level, [LEVEL]: level, message: messageText})[MESSAGE]);
+      }
+    }
+  }
+
+  processMessageObject(message) {
+    if (typeof message === 'object') {
+      return Object.keys(message).reduce((acc, key) => {
+        return `${acc ? acc + ', ' : ''}${this.processMessageItem(key, message[key])}`;
+      }, '');
+    }
+    return message;
+  }
+
+  maskString(value) {
+    if (typeof value !== 'string') {
+      return value;
+    } else {
+      let visibleLength = this.maskCharactersVisible;
+      if ((value.startsWith(`"`) && value.endsWith(`"`)) || (value.startsWith(`'`) && value.endsWith(`'`))) {
+        visibleLength += 1;
+      }
+      if (value.length <= visibleLength) {
+        return '*'.repeat(value.length);
+      } else if (value.length <= visibleLength * 3) {
+        return value.substring(0, visibleLength) + '*'.repeat(value.length);
+      } else {
+        return (
+          value.substring(0, visibleLength) + '*'.repeat(value.length - visibleLength * 2) + value.substring(value.length - visibleLength)
+        );
+      }
+    }
   }
 
   maskMessageItem(key, value) {
@@ -101,19 +135,19 @@ class SecuredLogger extends Logger {
   }
 
   error(...message) {
-    super.error(message);
+    this.log('error', message);
   }
 
   warn(...message) {
-    super.warn(message);
+    this.log('warn', message);
   }
 
   info(...message) {
-    super.info(message);
+    this.log('info', message);
   }
 
   debug(...message) {
-    super.debug(message);
+    this.log('debug', message);
   }
 }
 
