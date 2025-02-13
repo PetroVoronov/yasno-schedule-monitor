@@ -23,7 +23,7 @@
     "logform": "^2.7.0",
     "node-localstorage": "^3.0.5",
     "string-template": "^1.0.0",
-    "telegram": "2.26.12",
+    "telegram": "2.26.22",
     "triple-beam": "^1.4.1",
     "yargs": "^17.7.2"
   },
