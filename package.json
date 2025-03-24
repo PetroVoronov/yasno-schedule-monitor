@@ -17,7 +17,7 @@
     "axios": "^1.7.9",
     "date-fns-tz": "^3.2.0",
     "googleapis": "^144.0.0",
-    "grammy": "^1.33.0",
+    "grammy": "^1.35.1",
     "i18n": "^0.15.1",
     "json-stringify-safe": "^5.0.1",
     "logform": "^2.7.0",
