@@ -5,7 +5,7 @@ const readline = require('node:readline/promises');
 const { stdin: input, stdout: output, exit } = require('node:process');
 const stringify = require('json-stringify-safe');
 const { LocalStorage } = require('node-localstorage');
-const yargs = require('yargs');
+const yargsParser = require('yargs-parser');
 const { Cache } = require('./modules/cache/Cache');
 const { securedLogger: log } = require('./modules/logging/logging');
 const { name: scriptName, version: scriptVersion } = require('./version');
@@ -19,40 +19,60 @@ const { google } = require('googleapis');
 
 // i18n.setLocale(options.language);
 
-const options = yargs
-  .usage('Usage: $0 [options]')
-  .option('as-user', {
-    describe: 'Start as user instance (bot instance by default)',
-    type: 'boolean',
-    default: false,
-    demandOption: false,
-  })
-  .option('i', {
-    alias: 'schedule-update-interval',
-    describe: 'Update interval for schedule in minutes',
-    type: 'number',
-    default: 5,
-    min: 1,
-    max: 120,
-    demandOption: false,
-  })
-  .option('l', {
-    alias: 'language',
-    describe: 'Language code for i18n',
-    type: 'string',
-    default: 'uk',
-    demandOption: false,
-  })
-  .option('d', {
-    alias: 'debug',
-    describe: 'Debug level of logging',
-    type: 'boolean',
-    demandOption: false,
-  })
-  .version(scriptVersion)
-  .help('h')
-  .alias('h', 'help')
-  .epilog(`${scriptName} v${scriptVersion}`).argv;
+const parsedArgs = yargsParser(process.argv.slice(2), {
+  alias: {
+    i: 'schedule-update-interval',
+    l: 'language',
+    d: 'debug',
+    h: 'help',
+  },
+  boolean: ['as-user', 'debug', 'help', 'pin-message', 'unpin-previous'],
+  configuration: {
+    'camel-case-expansion': true,
+  },
+  string: ['language'],
+  default: {
+    'schedule-update-interval': 5,
+    language: 'uk',
+  },
+});
+
+if (parsedArgs.help) {
+  output.write(`Usage: ${scriptName} [options]\n\n`);
+  output.write('Options:\n');
+  output.write('  --as-user                 Start as user instance (bot instance by default)\n');
+  output.write('  -i, --schedule-update-interval <minutes>   Update interval for schedule in minutes (1-120)\n');
+  output.write('  -l, --language <code>     Language code for i18n (default: uk)\n');
+  output.write('  -d, --debug               Enable debug level logging\n');
+  output.write('  --pin-message             Pin update messages in Telegram\n');
+  output.write('  --unpin-previous          Unpin previous messages after pinning a new one\n');
+  output.write('  -h, --help                Show this help and exit\n');
+  output.write('      --version             Show version number and exit\n');
+  exit(0);
+}
+
+if (parsedArgs.version) {
+  output.write(`${scriptVersion}\n`);
+  exit(0);
+}
+
+const resolvedInterval = Number(
+  parsedArgs.scheduleUpdateInterval ?? parsedArgs['schedule-update-interval'],
+);
+
+if (!Number.isFinite(resolvedInterval) || resolvedInterval < 1 || resolvedInterval > 120) {
+  output.write('Error: schedule update interval must be a number between 1 and 120 minutes.\n');
+  exit(1);
+}
+
+const options = {
+  asUser: Boolean(parsedArgs.asUser ?? parsedArgs['as-user']),
+  scheduleUpdateInterval: resolvedInterval,
+  language: parsedArgs.language,
+  debug: Boolean(parsedArgs.debug),
+  pinMessage: Boolean(parsedArgs.pinMessage ?? parsedArgs['pin-message']),
+  unpinPrevious: Boolean(parsedArgs.unpinPrevious ?? parsedArgs['unpin-previous']),
+};
 
 if (options.debug) {
   log.setLevel('debug');
