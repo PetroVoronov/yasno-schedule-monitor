@@ -2,11 +2,9 @@
 
 ## [0.7.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.7.0...v0.7.1) (2025-10-23)
 
-
 ### Bug Fixes
 
 * **schedule:** detect changes using per-group signatures and propagate update timestamps ([4989714](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/4989714aa226f42f170957bc3fea41b95c76b135))
-
 
 ### Miscellaneous Chores
 
