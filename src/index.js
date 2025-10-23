@@ -12,11 +12,10 @@ const { name: scriptName, version: scriptVersion } = require('./version');
 const i18n = require('./modules/i18n/i18n.config');
 const axios = require('axios');
 const fs = require('node:fs');
-const { parse: parseDate } = require('date-fns');
+const { parseISO } = require('date-fns');
 const { toZonedTime, format: formatTz } = require('date-fns-tz');
 const template = require('string-template');
 const { google } = require('googleapis');
-const { url } = require('node:inspector');
 
 // i18n.setLocale(options.language);
 
@@ -76,9 +75,9 @@ log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
 
 
 
-const yasnoApiUrl = 'https://api.yasno.com.ua/api/v1/pages/home/schedule-turn-off-electricity';
-const yasnoMainUrl = 'https://yasno.com.ua';
-let previousData = null;
+const yasnoApiUrl = 'https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages';
+const yasnoMainUrl = 'https://static.yasno.ua/kyiv/outages';
+let previousScheduleSnapshot = null;
 
 const storage = new LocalStorage('data/storage');
 const cache = new Cache({
@@ -99,6 +98,7 @@ const textScheduleUpdated = i18n.__('Schedule for {today} ({date}) has been upda
 const textToday = i18n.__('today');
 const textTomorrow = i18n.__('tomorrow');
 const textScheduleOutageDefiniteLine = i18n.__('- off: {start} - {end}');
+const textScheduleUpdatedAt = i18n.__('Data updated at {timestamp}');
 
 let textTelegramMessageHeader = '';
 
@@ -151,114 +151,240 @@ for (let group = 1; group <= 6; group++) {
 
 
 async function checkForUpdates() {
-  let currentData = null;
+  let processedData;
   try {
     const response = await axios.get(yasnoApiUrl);
-    const data = response.data;
-
-    // Find the relevant component
-    const component = data.components.find(comp => comp.template_name === 'electricity-outages-daily-schedule');
-    if (!component) {
-      log.error('Relevant component not found in the JSON data.');
+    processedData = transformPlannedOutages(response.data);
+    if (!processedData) {
+      log.error('Unable to process planned outage payload.');
       return;
     }
-
-    const kyivData = component.dailySchedule.kiev.today;
-    const lastRegistryUpdateTime = component.lastRegistryUpdateTime;
-
-    currentData = {
-      kyivData,
-      lastRegistryUpdateTime
-    };
-
   } catch (error) {
-    log.error('Error fetching or processing data:', error);
+    log.error('Error fetching planned outage data:', error);
+    return;
   }
-  if (!currentData) {
-    log.error('No data fetched or processed.');
-  } else {
 
-    const targetDate = parseScheduleTargetDate(currentData.kyivData.title);
-    log.debug(`Target date: ${targetDate}`);
+  const scheduleChanged =
+    previousScheduleSnapshot === null ||
+    previousScheduleSnapshot.rawSignature !== processedData.rawSignature ||
+    previousScheduleSnapshot.latestUpdate !== processedData.latestUpdate ||
+    previousScheduleSnapshot.dayKey !== processedData.dayKey;
 
-    if (previousData === null ||
-      (JSON.stringify(previousData?.kyivData) !== JSON.stringify(currentData.kyivData) ||
-        previousData?.lastRegistryUpdateTime !== currentData.lastRegistryUpdateTime)) {
-      log.info('Schedule or registry update time has changed.');
+  if (!scheduleChanged) {
+    log.info('No changes in the planned outage schedule.');
+    return;
+  }
 
-      // Process the kievData to create intervals of hours with DEFINITE_OUTAGE
-      const intervals = createOutageIntervals(currentData.kyivData.groups);
+  log.info(
+    `Planned outage schedule has changed for ${processedData.dayKey} (${processedData.targetDate.toISOString()}).`
+  );
 
-      await processScheduleUpdate(intervals, targetDate, currentData.lastRegistryUpdateTime);
-
-      previousData = currentData;
-
-
-    } else {
-      log.info('No changes in the schedule or registry update time.');
-    }
+  try {
+    await processScheduleUpdate(
+      processedData.intervals,
+      processedData.targetDate,
+      processedData.latestUpdate,
+      processedData.groupUpdates
+    );
+    previousScheduleSnapshot = {
+      rawSignature: processedData.rawSignature,
+      latestUpdate: processedData.latestUpdate,
+      dayKey: processedData.dayKey,
+    };
+  } catch (error) {
+    log.error('Failed to process planned outage update:', error);
   }
 }
 
-function parseScheduleTargetDate(dateString) {
-  // Define the format of the input date string
-  const formatString = " dd.MM.yyyy 'на' HH:mm";
+function transformPlannedOutages(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
 
-  // Parse the date string using the specified format and locale
-  const result = parseDate(dateString.split(',').pop(), formatString, new Date(), { locale: 'uk' });
-  return result;
-}
+  const selectedDay = determineScheduleDay(payload);
+  if (!selectedDay) {
+    log.warn('Unable to determine schedule day from planned outage payload.');
+    return null;
+  }
 
-function createOutageIntervals(kievData) {
+  let targetDate;
+  try {
+    targetDate = parseISO(selectedDay.date);
+  } catch (error) {
+    log.error(`Unable to parse schedule date "${selectedDay.date}":`, error);
+    return null;
+  }
+
+  if (Number.isNaN(targetDate?.getTime())) {
+    log.error(`Parsed schedule date "${selectedDay.date}" is invalid.`);
+    return null;
+  }
+
   const intervals = {};
+  const groupUpdates = {};
+  let latestUpdateDate = null;
+  let latestUpdate = null;
+  const relevantGroups = groups.length > 0 ? groups : Object.keys(payload);
 
-  for (const group of Object.keys(kievData)) {
-    const hours = kievData[group];
-    let interval = null;
+  for (const group of relevantGroups) {
+    const groupData = payload[group];
+    if (!groupData) {
+      log.warn(`No planned outage data returned for group ${group}`);
+      intervals[group] = [];
+      continue;
+    }
 
-    intervals[group] = [];
+    const dayData = groupData[selectedDay.dayKey];
+    if (!dayData || !Array.isArray(dayData.slots)) {
+      intervals[group] = [];
+      continue;
+    }
 
-    for (const hour of hours) {
-      if (hour.type === 'DEFINITE_OUTAGE') {
-        if (!interval) {
-          interval = { start: hour.start, end: hour.end };
-        } else if (hour.start === interval.end) {
-          interval.end = hour.end;
-        } else {
-          intervals[group].push(interval);
-          interval = { start: hour.start, end: hour.end };
-        }
-      } else if (interval) {
-        intervals[group].push(interval);
-        interval = null;
+
+    let groupUpdateDate = null;
+    let groupUpdateValue = null;
+
+    for (const candidate of [groupData.updatedOn, dayData.updatedOn]) {
+      if (!candidate) {
+        continue;
+      }
+      const updatedOnDate = new Date(candidate);
+      if (Number.isNaN(updatedOnDate.getTime())) {
+        continue;
+      }
+
+      if (!groupUpdateDate || updatedOnDate > groupUpdateDate) {
+        groupUpdateDate = updatedOnDate;
+        groupUpdateValue = candidate;
+      }
+
+      if (!latestUpdateDate || updatedOnDate > latestUpdateDate) {
+        latestUpdateDate = updatedOnDate;
+        latestUpdate = candidate;
       }
     }
-    if (interval) {
-      intervals[group].push(interval);
+
+    if (groupUpdateValue) {
+      groupUpdates[group] = groupUpdateValue;
+    }
+
+    intervals[group] = buildIntervalsFromSlots(dayData.slots);
+  }
+
+  const rawSignature = stringify(payload);
+  const latestUpdateTime = latestUpdate || new Date().toISOString();
+
+  return {
+    intervals,
+    targetDate,
+    latestUpdate: latestUpdateTime,
+    groupUpdates,
+    rawSignature,
+    dayKey: selectedDay.dayKey,
+  };
+}
+
+function determineScheduleDay(payload) {
+  const availableGroups = groups.length > 0 ? groups : Object.keys(payload);
+  if (availableGroups.length === 0) {
+    return null;
+  }
+
+  const dayPreference = [
+    { key: 'today', predicate: (day) => day?.status === 'ScheduleApplies' },
+    { key: 'today', predicate: (day) => Boolean(day) },
+    { key: 'tomorrow', predicate: (day) => day?.status === 'ScheduleApplies' },
+    { key: 'tomorrow', predicate: (day) => Boolean(day) },
+  ];
+
+  for (const { key, predicate } of dayPreference) {
+    for (const group of availableGroups) {
+      const day = payload[group]?.[key];
+      if (day && day.date && predicate(day)) {
+        return { dayKey: key, date: day.date };
+      }
     }
   }
 
-  return intervals;
+  return null;
+}
+
+function buildIntervalsFromSlots(slots) {
+  if (!Array.isArray(slots)) {
+    return [];
+  }
+
+  const definiteSlots = slots
+    .filter((slot) => slot && typeof slot.start === 'number' && typeof slot.end === 'number' && String(slot.type).toLowerCase() === 'definite')
+    .sort((slotA, slotB) => slotA.start - slotB.start);
+
+  const mergedIntervals = [];
+
+  for (const slot of definiteSlots) {
+    const startMinutes = slot.start;
+    const endMinutes = slot.end;
+
+    if (endMinutes <= startMinutes) {
+      continue;
+    }
+
+    if (mergedIntervals.length === 0) {
+      mergedIntervals.push({ startMinutes, endMinutes });
+      continue;
+    }
+
+    const lastInterval = mergedIntervals[mergedIntervals.length - 1];
+    if (lastInterval.endMinutes === startMinutes) {
+      lastInterval.endMinutes = endMinutes;
+    } else {
+      mergedIntervals.push({ startMinutes, endMinutes });
+    }
+  }
+
+  return mergedIntervals;
 }
 
 function dateToString(date) {
   return date.toLocaleString('uk-UA', { timeZone: timeZone }).slice(0, 10);
 }
 
-function todaySetHour(today, hour, min = 0, sec = 0, ms = 0) {
-  const date = toZonedTime(new Date(), timeZone);
-  const halfHour = hour % 1;
-  if (halfHour === 0) {
-    return formatTz(date.setHours(hour, min, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
-  }
-  else {
-    const nextHour = Math.floor(hour);
-    const nextMin = halfHour * 60;
-    return formatTz(date.setHours(nextHour, nextMin, sec, ms), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
-  }
+function formatDateWithTimezone(date) {
+  return formatTz(date, "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
 }
 
-async function processScheduleUpdate(intervals, today, registryUpdateTime) {
+function setTimeForDate(baseDate, hours, minutes, seconds = 0, milliseconds = 0) {
+  const zonedDate = toZonedTime(baseDate, timeZone);
+  const result = new Date(zonedDate.getTime());
+  result.setHours(hours, minutes, seconds, milliseconds);
+  return result;
+}
+
+function formatDateTimeForMinutes(baseDate, totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return formatDateWithTimezone(setTimeForDate(baseDate, hours, minutes, 0, 0));
+}
+
+function formatStartOfDay(baseDate) {
+  return formatDateWithTimezone(setTimeForDate(baseDate, 0, 0, 0, 0));
+}
+
+function formatEndOfDay(baseDate) {
+  return formatDateWithTimezone(setTimeForDate(baseDate, 23, 59, 59, 999));
+}
+
+function formatUpdatedOn(timestamp) {
+  if (!timestamp) {
+    return null;
+  }
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return formatTz(date, 'dd.MM.yyyy HH:mm', { timeZone });
+}
+
+async function processScheduleUpdate(intervals, today, registryUpdateTime, groupUpdateTimes = {}) {
   const todayStr = dateToString(today);
   const now = toZonedTime(new Date(), timeZone);
   const textForData = today.getDay() === now.getDay() ? textToday : textTomorrow;
@@ -281,12 +407,22 @@ async function processScheduleUpdate(intervals, today, registryUpdateTime) {
       schedule.updated = scheduleUpdate;
     }
     if (intervals[group]) {
-      if (stringify(schedule.schedule) !== stringify(intervals[group])) {
+      const newIntervals = intervals[group];
+      const currentIntervals = stringify(schedule.schedule);
+      const incomingIntervals = stringify(newIntervals);
+      const groupUpdatedOn = groupUpdateTimes[group] || registryUpdateTime;
+      if (incomingIntervals !== currentIntervals) {
         schedule.schedule = intervals[group];
         schedule.updated = registryUpdateTime;
+        schedule.updatedOn = groupUpdatedOn;
         log.debug(`Schedule for group ${group} has been updated to:`, stringify(intervals[group]));
         await calendarUpdate(group, today);
+      } else if (groupUpdatedOn && schedule.updatedOn !== groupUpdatedOn) {
+        schedule.updated = registryUpdateTime;
+        schedule.updatedOn = groupUpdatedOn;
       }
+    } else if (groupUpdateTimes[group]) {
+      groupsSchedule[group].updatedOn = groupUpdateTimes[group];
     }
   };
 }
@@ -310,8 +446,8 @@ async function authenticateToCalendar(key) {
 
 async function getCalendarEvents(calendar, auth, calendarId, today) {
   try {
-    const startOfDay = todaySetHour(today, 0, 0, 0, 0);
-    const endOfDay = todaySetHour(today, 23, 59, 59, 999);
+    const startOfDay = formatStartOfDay(today);
+    const endOfDay = formatEndOfDay(today);
     const response = await calendar.events.list({
       auth: auth,
       calendarId: calendarId,
@@ -333,11 +469,11 @@ function prepareCalendarEvent(group, today, interval) {
     summary: template(calendarEventSummary, { group }),
     description: template(calendarEventDescription, { timestamp, url: yasnoMainUrl }),
     start: {
-      dateTime: todaySetHour(today, interval.start),
+      dateTime: formatDateTimeForMinutes(today, interval.startMinutes),
       timeZone: timeZone
     },
     end: {
-      dateTime: todaySetHour(today, interval.end),
+      dateTime: formatDateTimeForMinutes(today, interval.endMinutes),
       timeZone: timeZone
     }
   }
@@ -403,6 +539,11 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
 
 async function telegramSendUpdate(group, groupEvents) {
   let message = textTelegramMessageHeader + ':';
+  const scheduleMeta = groupsSchedule[group];
+  const formattedUpdatedOn = formatUpdatedOn(scheduleMeta?.updatedOn);
+  if (formattedUpdatedOn) {
+    message += `\n${template(textScheduleUpdatedAt, { timestamp: formattedUpdatedOn })}`;
+  }
   if (groupEvents.length === 0) {
     message += `\n${i18n.__('no outages!')}`;
   } else {
