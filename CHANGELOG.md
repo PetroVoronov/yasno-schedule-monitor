@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.6.1...v0.7.0) (2025-10-23)
+
+
+### Features
+
+* **cli:** replace yargs with yargs-parser and improve CLI handling ([f87a736](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/f87a736dc6b1b72194c08aefec309ad7ecbba38d))
+* **schedule:** adapt to new Yasno API schema and improve update handling ([3c83000](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/3c8300089ecb30880a9ee0258358ea549c05baf9))
+* **schedule:** add --ignore-status flag and handle schedule status ([4ee2a42](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/4ee2a42fcdbe65ca9bca44bb1fe82426bbc056ba))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump dependencies and devDependencies ([f87a736](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/f87a736dc6b1b72194c08aefec309ad7ecbba38d))
+* **deps:** bump googleapis to ^164.1.0 and adapt code for new client API ([a3fbda9](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/a3fbda92cff7f7d692ce5e74227eaa83005274f1))
+* **locales:** add "Data updated at {timestamp}" key and fix trailing commas in en/de/uk JSON files ([9abc39e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/9abc39e221e91df34935a5c3b4243ab78b2b7899))
+
+
+### Documentation
+
+* **commit-message-instructions:** Add comprehensive commit message guide ([b16811e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/b16811e5c38f7a44f3a9e2c8f996678a7855e07e))
+
 ## [0.6.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.6.0...v0.6.1) (2024-12-26)
 
 ### Code Refactoring
