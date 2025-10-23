@@ -212,7 +212,7 @@ async function checkForUpdates() {
       dayKey: processedData.dayKey,
     };
   } catch (error) {
-    log.error('Failed to process planned outage update:', error);
+    log.error('Failed to process planned outage update:', error?.stack || error);
   }
 }
 
@@ -453,12 +453,11 @@ async function readPrivateKey() {
 }
 
 async function authenticateToCalendar(key) {
-  const jwtClient = new google.auth.JWT(
-    key.client_email,
-    null,
-    key.private_key,
-    [calendarScope, calendarEventsScope]
-  );
+  const jwtClient = new google.auth.JWT({
+    email: key.client_email,
+    key: key.private_key,
+    scopes: [calendarScope, calendarEventsScope],
+  });
   await jwtClient.authorize();
   return jwtClient;
 }
@@ -547,7 +546,7 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
       await calendar.events.insert({
         auth: auth,
         calendarId: calendarId,
-        resource: event
+        requestBody: event
       });
     } catch (error) {
       console.error('Error adding calendar event:', error);
