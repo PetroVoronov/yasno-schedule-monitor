@@ -26,7 +26,7 @@ const parsedArgs = yargsParser(process.argv.slice(2), {
     d: 'debug',
     h: 'help',
   },
-  boolean: ['as-user', 'debug', 'help', 'pin-message', 'unpin-previous'],
+  boolean: ['as-user', 'debug', 'help', 'pin-message', 'unpin-previous', 'ignore-status'],
   configuration: {
     'camel-case-expansion': true,
   },
@@ -46,6 +46,7 @@ if (parsedArgs.help) {
   output.write('  -d, --debug               Enable debug level logging\n');
   output.write('  --pin-message             Pin update messages in Telegram\n');
   output.write('  --unpin-previous          Unpin previous messages after pinning a new one\n');
+  output.write('  --ignore-status           Process schedules even if status is not ScheduleApplies\n');
   output.write('  -h, --help                Show this help and exit\n');
   output.write('      --version             Show version number and exit\n');
   exit(0);
@@ -72,6 +73,7 @@ const options = {
   debug: Boolean(parsedArgs.debug),
   pinMessage: Boolean(parsedArgs.pinMessage ?? parsedArgs['pin-message']),
   unpinPrevious: Boolean(parsedArgs.unpinPrevious ?? parsedArgs['unpin-previous']),
+  ignoreStatus: Boolean(parsedArgs.ignoreStatus ?? parsedArgs['ignore-status']),
 };
 
 if (options.debug) {
@@ -119,6 +121,7 @@ const textToday = i18n.__('today');
 const textTomorrow = i18n.__('tomorrow');
 const textScheduleOutageDefiniteLine = i18n.__('- off: {start} - {end}');
 const textScheduleUpdatedAt = i18n.__('Data updated at {timestamp}');
+const textScheduleNotApplies = i18n.__('Schedule not in effect yet.');
 
 let textTelegramMessageHeader = '';
 
@@ -204,7 +207,8 @@ async function checkForUpdates() {
       processedData.intervals,
       processedData.targetDate,
       processedData.latestUpdate,
-      processedData.groupUpdates
+      processedData.groupUpdates,
+      processedData.groupStatuses
     );
     previousScheduleSnapshot = {
       rawSignature: processedData.rawSignature,
@@ -242,6 +246,7 @@ function transformPlannedOutages(payload) {
 
   const intervals = {};
   const groupUpdates = {};
+  const groupStatuses = {};
   let latestUpdateDate = null;
   let latestUpdate = null;
   const relevantGroups = groups.length > 0 ? groups : Object.keys(payload);
@@ -251,14 +256,19 @@ function transformPlannedOutages(payload) {
     if (!groupData) {
       log.warn(`No planned outage data returned for group ${group}`);
       intervals[group] = [];
+      groupStatuses[group] = false;
       continue;
     }
 
     const dayData = groupData[selectedDay.dayKey];
     if (!dayData || !Array.isArray(dayData.slots)) {
       intervals[group] = [];
+      groupStatuses[group] = false;
       continue;
     }
+
+    const scheduleApplies = String(dayData.status || '').toLowerCase() === 'scheduleapplies'.toLowerCase();
+    groupStatuses[group] = scheduleApplies;
 
 
     let groupUpdateDate = null;
@@ -288,6 +298,11 @@ function transformPlannedOutages(payload) {
       groupUpdates[group] = groupUpdateValue;
     }
 
+    if (!scheduleApplies && !options.ignoreStatus) {
+      intervals[group] = [];
+      continue;
+    }
+
     intervals[group] = buildIntervalsFromSlots(dayData.slots);
   }
 
@@ -299,6 +314,7 @@ function transformPlannedOutages(payload) {
     targetDate,
     latestUpdate: latestUpdateTime,
     groupUpdates,
+    groupStatuses,
     rawSignature,
     dayKey: selectedDay.dayKey,
   };
@@ -404,7 +420,13 @@ function formatUpdatedOn(timestamp) {
   return formatTz(date, 'dd.MM.yyyy HH:mm', { timeZone });
 }
 
-async function processScheduleUpdate(intervals, today, registryUpdateTime, groupUpdateTimes = {}) {
+async function processScheduleUpdate(
+  intervals,
+  today,
+  registryUpdateTime,
+  groupUpdateTimes = {},
+  groupStatuses = {},
+) {
   const todayStr = dateToString(today);
   const now = toZonedTime(new Date(), timeZone);
   const textForData = today.getDay() === now.getDay() ? textToday : textTomorrow;
@@ -426,6 +448,19 @@ async function processScheduleUpdate(intervals, today, registryUpdateTime, group
       schedule.schedule = [];
       schedule.updated = scheduleUpdate;
     }
+    let scheduleApplies = groupStatuses[group] === true;
+    if (options.ignoreStatus) {
+      scheduleApplies = true;
+    }
+    schedule.isActive = scheduleApplies;
+    if (!scheduleApplies && !options.ignoreStatus) {
+      const groupUpdatedOn = groupUpdateTimes[group] || registryUpdateTime;
+      if (groupUpdatedOn) {
+        schedule.updatedOn = groupUpdatedOn;
+      }
+      log.debug(`Skipping calendar update for group ${group} because status is not ScheduleApplies.`);
+      continue;
+    }
     if (intervals[group]) {
       const newIntervals = intervals[group];
       const currentIntervals = stringify(schedule.schedule);
@@ -440,6 +475,7 @@ async function processScheduleUpdate(intervals, today, registryUpdateTime, group
       } else if (groupUpdatedOn && schedule.updatedOn !== groupUpdatedOn) {
         schedule.updated = registryUpdateTime;
         schedule.updatedOn = groupUpdatedOn;
+        schedule.isActive = true;
       }
     } else if (groupUpdateTimes[group]) {
       groupsSchedule[group].updatedOn = groupUpdateTimes[group];
@@ -559,6 +595,9 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
 async function telegramSendUpdate(group, groupEvents) {
   let message = textTelegramMessageHeader + ':';
   const scheduleMeta = groupsSchedule[group];
+  if (scheduleMeta?.isActive === false && !options.ignoreStatus) {
+    message += `\n${textScheduleNotApplies}`;
+  }
   const formattedUpdatedOn = formatUpdatedOn(scheduleMeta?.updatedOn);
   if (formattedUpdatedOn) {
     message += `\n${template(textScheduleUpdatedAt, { timestamp: formattedUpdatedOn })}`;

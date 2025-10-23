@@ -6,5 +6,6 @@
 	"tomorrow": "завтра",
 	"- off: {start} - {end}": "- 🕯 : {start} - {end}",
 	"no outages!": "без відключень!",
-	"Data updated at {timestamp}": "Дані оновлено о {timestamp}"
+	"Data updated at {timestamp}": "Дані оновлено о {timestamp}",
+	"Schedule not in effect yet.": "Розклад ще не діє."
 }
