@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.7.0...v0.7.1) (2025-10-23)
+
+### Bug Fixes
+
+* **schedule:** detect changes using per-group signatures and propagate update timestamps ([4989714](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/4989714aa226f42f170957bc3fea41b95c76b135))
+
+### Miscellaneous Chores
+
+* **vscode:** add launch.json to configure Node.js debugger ([4db391d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/4db391dbda57478047ccec8236ed2186dd2c2bc1))
+
 ## [0.7.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.6.1...v0.7.0) (2025-10-23)
 
 ### Features
