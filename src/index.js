@@ -187,11 +187,19 @@ async function checkForUpdates() {
     return;
   }
 
+  const currentGroupUpdatesSignature =
+    processedData.groupUpdatesSignature || stringify(processedData.groupUpdates || {});
+  const currentGroupStatusesSignature =
+    processedData.groupStatusesSignature || stringify(processedData.groupStatuses || {});
+  const previousGroupUpdatesSignature = previousScheduleSnapshot?.groupUpdatesSignature;
+  const previousGroupStatusesSignature = previousScheduleSnapshot?.groupStatusesSignature;
+  const dayChanged = previousScheduleSnapshot?.dayKey !== processedData.dayKey;
+
   const scheduleChanged =
     previousScheduleSnapshot === null ||
-    previousScheduleSnapshot.rawSignature !== processedData.rawSignature ||
-    previousScheduleSnapshot.latestUpdate !== processedData.latestUpdate ||
-    previousScheduleSnapshot.dayKey !== processedData.dayKey;
+    dayChanged ||
+    previousGroupUpdatesSignature !== currentGroupUpdatesSignature ||
+    previousGroupStatusesSignature !== currentGroupStatusesSignature;
 
   if (!scheduleChanged) {
     log.info('No changes in the planned outage schedule.');
@@ -201,6 +209,17 @@ async function checkForUpdates() {
   log.info(
     `Planned outage schedule has changed for ${processedData.dayKey} (${processedData.targetDate.toISOString()}).`
   );
+  if (previousScheduleSnapshot) {
+    if (dayChanged) {
+      log.debug('Schedule day key changed compared to previous snapshot.');
+    }
+    if (previousGroupUpdatesSignature !== currentGroupUpdatesSignature) {
+      log.debug('Detected differences in per-group updatedOn values.');
+    }
+    if (previousGroupStatusesSignature !== currentGroupStatusesSignature) {
+      log.debug('Detected differences in per-group status values.');
+    }
+  }
 
   try {
     await processScheduleUpdate(
@@ -211,9 +230,9 @@ async function checkForUpdates() {
       processedData.groupStatuses
     );
     previousScheduleSnapshot = {
-      rawSignature: processedData.rawSignature,
-      latestUpdate: processedData.latestUpdate,
       dayKey: processedData.dayKey,
+      groupUpdatesSignature: currentGroupUpdatesSignature,
+      groupStatusesSignature: currentGroupStatusesSignature,
     };
   } catch (error) {
     log.error('Failed to process planned outage update:', error?.stack || error);
@@ -306,8 +325,9 @@ function transformPlannedOutages(payload) {
     intervals[group] = buildIntervalsFromSlots(dayData.slots);
   }
 
-  const rawSignature = stringify(payload);
   const latestUpdateTime = latestUpdate || new Date().toISOString();
+  const groupUpdatesSignature = stringify(groupUpdates);
+  const groupStatusesSignature = stringify(groupStatuses);
 
   return {
     intervals,
@@ -315,7 +335,8 @@ function transformPlannedOutages(payload) {
     latestUpdate: latestUpdateTime,
     groupUpdates,
     groupStatuses,
-    rawSignature,
+    groupUpdatesSignature,
+    groupStatusesSignature,
     dayKey: selectedDay.dayKey,
   };
 }
@@ -457,6 +478,7 @@ async function processScheduleUpdate(
       const groupUpdatedOn = groupUpdateTimes[group] || registryUpdateTime;
       if (groupUpdatedOn) {
         schedule.updatedOn = groupUpdatedOn;
+        schedule.updated = schedule.updated || groupUpdatedOn;
       }
       log.debug(`Skipping calendar update for group ${group} because status is not ScheduleApplies.`);
       continue;
@@ -466,19 +488,21 @@ async function processScheduleUpdate(
       const currentIntervals = stringify(schedule.schedule);
       const incomingIntervals = stringify(newIntervals);
       const groupUpdatedOn = groupUpdateTimes[group] || registryUpdateTime;
+      const effectiveUpdateTime = groupUpdatedOn || registryUpdateTime;
       if (incomingIntervals !== currentIntervals) {
         schedule.schedule = intervals[group];
-        schedule.updated = registryUpdateTime;
-        schedule.updatedOn = groupUpdatedOn;
+        schedule.updated = effectiveUpdateTime;
+        schedule.updatedOn = groupUpdatedOn || schedule.updatedOn;
         log.debug(`Schedule for group ${group} has been updated to:`, stringify(intervals[group]));
         await calendarUpdate(group, today);
       } else if (groupUpdatedOn && schedule.updatedOn !== groupUpdatedOn) {
-        schedule.updated = registryUpdateTime;
+        schedule.updated = groupUpdatedOn;
         schedule.updatedOn = groupUpdatedOn;
         schedule.isActive = true;
       }
     } else if (groupUpdateTimes[group]) {
       groupsSchedule[group].updatedOn = groupUpdateTimes[group];
+      groupsSchedule[group].updated = groupUpdateTimes[group];
     }
   };
 }
@@ -518,8 +542,8 @@ async function getCalendarEvents(calendar, auth, calendarId, today) {
 }
 
 
-function prepareCalendarEvent(group, today, interval) {
-  const timestamp = formatTz(today, "dd.MM.yyyy HH:mm", { timeZone });
+function prepareCalendarEvent(group, today, interval, updatedOn) {
+  const timestamp = formatTz(updatedOn, "dd.MM.yyyy HH:mm", { timeZone });
   return {
     summary: template(calendarEventSummary, { group }),
     description: template(calendarEventDescription, { timestamp, url: yasnoMainUrl }),
@@ -534,10 +558,10 @@ function prepareCalendarEvent(group, today, interval) {
   }
 }
 
-function prepareCalendarEvents(group, today, intervals) {
+function prepareCalendarEvents(group, today, intervals, updatedOn) {
   const events = [];
   for (const interval of intervals) {
-    events.push(prepareCalendarEvent(group, today, interval));
+    events.push(prepareCalendarEvent(group, today, interval, updatedOn));
   }
   return events;
 }
@@ -649,7 +673,7 @@ async function telegramSendUpdate(group, groupEvents) {
 
 async function calendarUpdate(group, today) {
   const groupSchedule = groupsSchedule[group];
-  const eventsNew = prepareCalendarEvents(group, today, groupSchedule.schedule);
+  const eventsNew = prepareCalendarEvents(group, today, groupSchedule.schedule, groupSchedule.updatedOn);
   log.debug('Events new:', stringify(eventsNew));
   const auth = await authenticateToCalendar(await readPrivateKey());
   const calendar = google.calendar('v3');
