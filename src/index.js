@@ -99,7 +99,6 @@ log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
 
 const yasnoApiUrl = 'https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages';
 const yasnoMainUrl = 'https://static.yasno.ua/kyiv/outages';
-let previousData = null;
 
 const storage = new LocalStorage('data/storage');
 const cache = new Cache({
@@ -194,8 +193,7 @@ async function checkForUpdates() {
   }
 
   try {
-    await processScheduleUpdate(currentData, previousData, todayStr);
-    previousData = currentData;
+    await processScheduleUpdate(currentData, todayStr);
   } catch (error) {
     log.error('Failed to process planned outage update:', error?.stack || error);
   }
@@ -227,6 +225,10 @@ function transformPlannedOutages(payload, todayStr) {
       continue;
     }
     groupUpdates[group] = groupUpdatedOn;
+    log.debug(`Group ${group} updated on ${formatUpdatedOn(groupUpdatedOn)}`);
+
+    log.debug(`Processing planned outages for group ${group} on keys: ${Object.keys(groupData).join(', ')} ...`);
+
     for (const dayKey of Object.keys(groupData)) {
 
       const dayData = groupData[dayKey];
@@ -242,18 +244,21 @@ function transformPlannedOutages(payload, todayStr) {
       
       const dayDateStr = formatDateInZone(dayValue, timeZone);
       intervals[group][dayDateStr] = [];
+      log.debug(`Processing group ${group} for day ${dayKey} with date string ${dayDateStr} ...`);
   
       const scheduleApplies = String(dayData.status || '').toLowerCase() === 'scheduleapplies'.toLowerCase();
       if (!scheduleApplies && !options.ignoreStatus) {
         log.debug(`Schedule does not apply for group ${group} on ${dayKey} (${dayData.date}).`);
         continue;
       }
+      log.debug(`Schedule applies for group ${group} on ${dayKey} (${dayData.date}).`);
 
       if (parseInt(dayDateStr, 10) < parseInt(todayStr, 10)) {
         log.debug(`Day ${dayDateStr} is in the past for group ${group} on ${dayKey}.`);
         continue;
       }
       intervals[group][dayDateStr] = buildIntervalsFromSlots(dayData.slots);
+      log.debug(`Intervals for group ${group} on ${dayDateStr}: ${stringify(intervals[group][dayDateStr])}`);
     }
   }
 
@@ -352,7 +357,6 @@ function formatUpdatedOn(timestamp) {
 
 async function processScheduleUpdate(
   currentData,
-  previousData,
   todayStr
 ) {
   const groupUpdateTimes = currentData.groupUpdates || {};
@@ -367,20 +371,10 @@ async function processScheduleUpdate(
       log.debug(`No intervals for group ${group}, skipping.`);
       continue;
     }
-    const previousGroupData = previousData ? previousData.intervals[group] || {} : {};
-    if (stringify(currentGroupData) === stringify(previousGroupData)) {
-      log.debug(`No changes in schedule for group ${group}.`);
-      continue;
-    }
     for (const dateKey of Object.keys(currentGroupData)) {
       const currentIntervals = currentGroupData[dateKey];
-      const previousIntervals = previousGroupData[dateKey];
-      if (!previousIntervals || stringify(currentIntervals) !== stringify(previousIntervals)) {
-        log.info(`Schedule for group ${group} on ${dateKey} has been updated on ${updateTime}.`);
-        await calendarUpdate(group, currentIntervals, dateKey, todayStr, updateTime);
-      } else {
-        log.debug(`No changes in schedule for group ${group} on ${dateKey}.`);
-      }
+      log.info(`Going to check schedule for group ${group} on ${dateKey} updated on ${updateTime}.`);
+      await calendarUpdate(group, currentIntervals, dateKey, todayStr, updateTime);
     }
   };
 }
