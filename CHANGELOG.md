@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.1...v0.8.2) (2025-10-25)
+
+### Bug Fixes
+
+* **schedule:** validate formatted day string and skip duplicate day entries; add debug log for day data processing ([cea8f58](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/cea8f58aadad72f405ea6e27f9cd7692067dbabf))
+
 ## [0.8.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.0...v0.8.1) (2025-10-25)
 
 ### Bug Fixes
