@@ -2,17 +2,14 @@
 
 ## [0.8.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.7.1...v0.8.0) (2025-10-25)
 
-
 ### Features
 
 * **schedule:** compare per-group per-day intervals and propagate update timestamps ([86da155](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/86da155d85ff13d30552d35daf17af4cad35e8ab))
-
 
 ### Code Refactoring
 
 * **logging:** use timezone-aware Intl.DateTimeFormat for timestamps and add setTimeZone ([27c26ed](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/27c26ed69431d017a3a1266a6e1e0ff3f052b20c))
 * **schedule,telegram:** centralize timezone, simplify outage transform, and make Telegram messaging async/await ([49134b3](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/49134b36484b43485dce03d63f4205db1c6e61d7))
-
 
 ### Build System
 
