@@ -1,6 +1,6 @@
-const {LEVEL, MESSAGE} = require('triple-beam');
-const {format} = require('logform');
-const {combine, timestamp, colorize, printf} = format;
+const { LEVEL, MESSAGE } = require('triple-beam');
+const { format } = require('logform');
+const { combine, timestamp, colorize, printf } = format;
 
 class SecuredLogger {
   maskCharactersVisible = 3;
@@ -27,14 +27,35 @@ class SecuredLogger {
     warn: 'magenta',
     error: 'red',
   };
+  timeZone = 'Europe/Kiev';
 
   constructor(level = 'info') {
     this.level = level;
     this.formatter = combine(
-      timestamp({format: 'YYYY-MM-DD' + 'T' + 'HH:mm:ss.SSS' /* myTimeFormat */}),
-      printf(({level, message, timestamp}) => `[${timestamp}] [${level}] - [${message}]`),
-      colorize({all: true, colors: this.levels}),
+      timestamp({
+        format: () => {
+          const formatter = new Intl.DateTimeFormat("en-CA", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            fractionalSecondDigits: 3,
+            hour12: false,
+            timeZone: this.timeZone, // e.g. "Europe/Kiev"
+          });
+          // Format like "2025-10-25, 20:05:12.123" → normalize to ISO style
+          return formatter.format(new Date()).replace(", ", "T");
+        },
+      }),
+      printf(({ level, message, timestamp }) => `[${timestamp}] [${level}] - [${message}]`),
+      colorize({ all: true, colors: this.levels }),
     );
+  }
+
+  setTimeZone(timeZone) {
+    this.timeZone = timeZone;
   }
 
   setLevel(level) {
@@ -80,7 +101,7 @@ class SecuredLogger {
         }, '');
       }
       if (typeof messageText === 'string') {
-        console.log(this.formatter.transform({level, [LEVEL]: level, message: messageText})[MESSAGE]);
+        console.log(this.formatter.transform({ level, [LEVEL]: level, message: messageText })[MESSAGE]);
       }
     }
   }
