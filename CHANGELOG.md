@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.8.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.7.1...v0.8.0) (2025-10-25)
+
+### Features
+
+* **schedule:** compare per-group per-day intervals and propagate update timestamps ([86da155](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/86da155d85ff13d30552d35daf17af4cad35e8ab))
+
+### Code Refactoring
+
+* **logging:** use timezone-aware Intl.DateTimeFormat for timestamps and add setTimeZone ([27c26ed](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/27c26ed69431d017a3a1266a6e1e0ff3f052b20c))
+* **schedule,telegram:** centralize timezone, simplify outage transform, and make Telegram messaging async/await ([49134b3](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/49134b36484b43485dce03d63f4205db1c6e61d7))
+
+### Build System
+
+* **deps-dev:** bump @babel/core from 7.28.4 to 7.28.5 ([05ba1ac](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/05ba1accd71d204d1938f97988490cc2236747a0))
+* **deps-dev:** bump @babel/core from 7.28.4 to 7.28.5 ([828ec02](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/828ec029c11e9a308f7dd66e27a7f57301858521))
+* **deps-dev:** bump @babel/eslint-parser from 7.28.4 to 7.28.5 ([6001aa1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/6001aa11f0978b6f02acfe79c610b37eb3faa21b))
+* **deps-dev:** bump @babel/eslint-parser from 7.28.4 to 7.28.5 ([0bac3aa](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/0bac3aa197d6f35ed91dedf827f0b2776482e0ff))
+* **deps:** bump yargs-parser from 21.1.1 to 22.0.0 ([5e1a7ec](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5e1a7ec63325ded78f3df26dcea8e73bc092a89b))
+* **deps:** bump yargs-parser from 21.1.1 to 22.0.0 ([303ca6e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/303ca6ea78208c9e4c83c4b3071066f5f9e0ad5d))
+
 ## [0.7.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.7.0...v0.7.1) (2025-10-23)
 
 ### Bug Fixes
