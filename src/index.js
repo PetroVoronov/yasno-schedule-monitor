@@ -17,8 +17,6 @@ const { toZonedTime, format: formatTz } = require('date-fns-tz');
 const template = require('string-template');
 const { google } = require('googleapis');
 
-// i18n.setLocale(options.language);
-
 const parsedArgs = yargsParser(process.argv.slice(2), {
   alias: {
     i: 'schedule-update-interval',
@@ -91,7 +89,6 @@ log.info(`Schedule update interval: ${options.scheduleUpdateInterval} minutes`);
 log.info(`Debug: ${options.debug}`);
 
 const groups = [];
-const groupsSchedule = {};
 
 log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
 
@@ -99,7 +96,7 @@ log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
 
 const yasnoApiUrl = 'https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages';
 const yasnoMainUrl = 'https://static.yasno.ua/kyiv/outages';
-let previousScheduleSnapshot = null;
+let previousData = null;
 
 const storage = new LocalStorage('data/storage');
 const cache = new Cache({
@@ -123,7 +120,6 @@ const textScheduleOutageDefiniteLine = i18n.__('- off: {start} - {end}');
 const textScheduleUpdatedAt = i18n.__('Data updated at {timestamp}');
 const textScheduleNotApplies = i18n.__('Schedule not in effect yet.');
 
-let textTelegramMessageHeader = '';
 
 
 const timeZone = 'Europe/Kiev'; // Replace with your desired time zone
@@ -174,11 +170,13 @@ for (let group = 1; group <= 6; group++) {
 
 
 async function checkForUpdates() {
-  let processedData;
+  let currentData;
+  const today = toZonedTime(new Date(), timeZone);
+  const todayStr = formatDateInZone(today, timeZone);
   try {
     const response = await axios.get(yasnoApiUrl);
-    processedData = transformPlannedOutages(response.data);
-    if (!processedData) {
+    currentData = transformPlannedOutages(response.data, todayStr);
+    if (!currentData) {
       log.error('Unable to process planned outage payload.');
       return;
     }
@@ -187,87 +185,26 @@ async function checkForUpdates() {
     return;
   }
 
-  const currentGroupUpdatesSignature =
-    processedData.groupUpdatesSignature || stringify(processedData.groupUpdates || {});
-  const currentGroupStatusesSignature =
-    processedData.groupStatusesSignature || stringify(processedData.groupStatuses || {});
-  const previousGroupUpdatesSignature = previousScheduleSnapshot?.groupUpdatesSignature;
-  const previousGroupStatusesSignature = previousScheduleSnapshot?.groupStatusesSignature;
-  const dayChanged = previousScheduleSnapshot?.dayKey !== processedData.dayKey;
-
-  const scheduleChanged =
-    previousScheduleSnapshot === null ||
-    dayChanged ||
-    previousGroupUpdatesSignature !== currentGroupUpdatesSignature ||
-    previousGroupStatusesSignature !== currentGroupStatusesSignature;
-
-  if (!scheduleChanged) {
-    log.info('No changes in the planned outage schedule.');
+  if (!currentData || !currentData.intervals) {
+    log.error('No valid intervals found in processed data.');
     return;
   }
 
-  log.info(
-    `Planned outage schedule has changed for ${processedData.dayKey} (${processedData.targetDate.toISOString()}).`
-  );
-  if (previousScheduleSnapshot) {
-    if (dayChanged) {
-      log.debug('Schedule day key changed compared to previous snapshot.');
-    }
-    if (previousGroupUpdatesSignature !== currentGroupUpdatesSignature) {
-      log.debug('Detected differences in per-group updatedOn values.');
-    }
-    if (previousGroupStatusesSignature !== currentGroupStatusesSignature) {
-      log.debug('Detected differences in per-group status values.');
-    }
-  }
-
   try {
-    await processScheduleUpdate(
-      processedData.intervals,
-      processedData.targetDate,
-      processedData.latestUpdate,
-      processedData.groupUpdates,
-      processedData.groupStatuses
-    );
-    previousScheduleSnapshot = {
-      dayKey: processedData.dayKey,
-      groupUpdatesSignature: currentGroupUpdatesSignature,
-      groupStatusesSignature: currentGroupStatusesSignature,
-    };
+    await processScheduleUpdate(currentData, previousData, todayStr);
+    previousData = currentData;
   } catch (error) {
     log.error('Failed to process planned outage update:', error?.stack || error);
   }
 }
 
-function transformPlannedOutages(payload) {
+function transformPlannedOutages(payload, todayDateStr) {
   if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-
-  const selectedDay = determineScheduleDay(payload);
-  if (!selectedDay) {
-    log.warn('Unable to determine schedule day from planned outage payload.');
-    return null;
-  }
-
-  let targetDate;
-  try {
-    targetDate = parseISO(selectedDay.date);
-  } catch (error) {
-    log.error(`Unable to parse schedule date "${selectedDay.date}":`, error);
-    return null;
-  }
-
-  if (Number.isNaN(targetDate?.getTime())) {
-    log.error(`Parsed schedule date "${selectedDay.date}" is invalid.`);
     return null;
   }
 
   const intervals = {};
   const groupUpdates = {};
-  const groupStatuses = {};
-  let latestUpdateDate = null;
-  let latestUpdate = null;
   const relevantGroups = groups.length > 0 ? groups : Object.keys(payload);
 
   for (const group of relevantGroups) {
@@ -279,67 +216,63 @@ function transformPlannedOutages(payload) {
       continue;
     }
 
-    const dayData = groupData[selectedDay.dayKey];
-    if (!dayData || !Array.isArray(dayData.slots)) {
-      intervals[group] = [];
-      groupStatuses[group] = false;
+    const groupUpdatedOn = new Date(groupData.updatedOn);
+    if (Number.isNaN(groupUpdatedOn.getTime())) {
+      log.warn(`No information about updatedOn for group ${group}`);
       continue;
     }
+    groupUpdates[group] = groupUpdatedOn;
+    for (const dayKey of ['today', 'tomorrow']) {
 
-    const scheduleApplies = String(dayData.status || '').toLowerCase() === 'scheduleapplies'.toLowerCase();
-    groupStatuses[group] = scheduleApplies;
-
-
-    let groupUpdateDate = null;
-    let groupUpdateValue = null;
-
-    for (const candidate of [groupData.updatedOn, dayData.updatedOn]) {
-      if (!candidate) {
-        continue;
-      }
-      const updatedOnDate = new Date(candidate);
-      if (Number.isNaN(updatedOnDate.getTime())) {
+      const dayData = groupData[dayKey];
+      if (!dayData || !Array.isArray(dayData.slots)) {
+        intervals[group] = [];
+        groupStatuses[group] = false;
         continue;
       }
 
-      if (!groupUpdateDate || updatedOnDate > groupUpdateDate) {
-        groupUpdateDate = updatedOnDate;
-        groupUpdateValue = candidate;
+      const scheduleApplies = String(dayData.status || '').toLowerCase() === 'scheduleapplies'.toLowerCase();
+      if (!scheduleApplies && !options.ignoreStatus) {
+        log.info(`Schedule does not apply for group ${group} on ${dayKey}.`);
       }
 
-      if (!latestUpdateDate || updatedOnDate > latestUpdateDate) {
-        latestUpdateDate = updatedOnDate;
-        latestUpdate = candidate;
+      const dayValue = new Date(dayData.date);
+      if (Number.isNaN(dayValue.getTime())) {
+        log.warn(`Invalid date value for group ${group} on ${dayKey}: ${dayData.date}`);
+        continue;
       }
-    }
 
-    if (groupUpdateValue) {
-      groupUpdates[group] = groupUpdateValue;
+      const dayDateStr = formatDateInZone(dayValue, timeZone);
+      if (parseInt(dayDateStr, 10) < parseInt(todayDateStr, 10)) {
+        log.info(`Day ${dayDateStr} is in the past for group ${group}.`);
+        continue;
+      }
+      if (!Array.isArray(intervals[group])) {
+        intervals[group] = [];
+      }
+      intervals[group][dayDateStr] = buildIntervalsFromSlots(dayData.slots);
     }
-
-    if (!scheduleApplies && !options.ignoreStatus) {
-      intervals[group] = [];
-      continue;
-    }
-
-    intervals[group] = buildIntervalsFromSlots(dayData.slots);
   }
 
-  const latestUpdateTime = latestUpdate || new Date().toISOString();
   const groupUpdatesSignature = stringify(groupUpdates);
-  const groupStatusesSignature = stringify(groupStatuses);
 
   return {
     intervals,
-    targetDate,
-    latestUpdate: latestUpdateTime,
     groupUpdates,
-    groupStatuses,
     groupUpdatesSignature,
-    groupStatusesSignature,
-    dayKey: selectedDay.dayKey,
   };
 }
+
+function formatDateInZone(date = new Date(), timeZone = "Europe/Kiev") {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone
+  });
+  return formatter.format(date); // "YYYY-MM-DD"
+}
+
 
 function determineScheduleDay(payload) {
   const availableGroups = groups.length > 0 ? groups : Object.keys(payload);
@@ -405,6 +338,11 @@ function dateToString(date) {
   return date.toLocaleString('uk-UA', { timeZone: timeZone }).slice(0, 10);
 }
 
+function parseDateStringAsLocal(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
 function formatDateWithTimezone(date) {
   return formatTz(date, "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone });
 }
@@ -442,67 +380,36 @@ function formatUpdatedOn(timestamp) {
 }
 
 async function processScheduleUpdate(
-  intervals,
-  today,
-  registryUpdateTime,
-  groupUpdateTimes = {},
-  groupStatuses = {},
+  currentData,
+  previousData,
+  todayStr
 ) {
-  const todayStr = dateToString(today);
-  const now = toZonedTime(new Date(), timeZone);
-  const textForData = today.getDay() === now.getDay() ? textToday : textTomorrow;
-  const scheduleUpdate = Math.floor(today.getTime() / 1000);
-  textTelegramMessageHeader = template(textScheduleUpdated, { today: textForData, date: todayStr });
+  const groupUpdateTimes = currentData.groupUpdates || {};
   for (const group of groups) {
-    if (!groupsSchedule[group]) {
-      groupsSchedule[group] = {};
-    }
-    const schedule = groupsSchedule[group];
-    if (schedule && schedule.today) {
-      if (dateToString(schedule.today) !== todayStr) {
-        schedule.today = today;
-        schedule.schedule = [];
-        schedule.updated = scheduleUpdate;
-      }
-    } else {
-      schedule.today = today;
-      schedule.schedule = [];
-      schedule.updated = scheduleUpdate;
-    }
-    let scheduleApplies = groupStatuses[group] === true;
-    if (options.ignoreStatus) {
-      scheduleApplies = true;
-    }
-    schedule.isActive = scheduleApplies;
-    if (!scheduleApplies && !options.ignoreStatus) {
-      const groupUpdatedOn = groupUpdateTimes[group] || registryUpdateTime;
-      if (groupUpdatedOn) {
-        schedule.updatedOn = groupUpdatedOn;
-        schedule.updated = schedule.updated || groupUpdatedOn;
-      }
-      log.debug(`Skipping calendar update for group ${group} because status is not ScheduleApplies.`);
+    const currentGroupData = currentData.intervals[group] || {};
+    const updateTime = groupUpdateTimes[group];
+    if (!updateTime) {
+      log.debug(`No update time for group ${group}, skipping.`);
       continue;
     }
-    if (intervals[group]) {
-      const newIntervals = intervals[group];
-      const currentIntervals = stringify(schedule.schedule);
-      const incomingIntervals = stringify(newIntervals);
-      const groupUpdatedOn = groupUpdateTimes[group] || registryUpdateTime;
-      const effectiveUpdateTime = groupUpdatedOn || registryUpdateTime;
-      if (incomingIntervals !== currentIntervals) {
-        schedule.schedule = intervals[group];
-        schedule.updated = effectiveUpdateTime;
-        schedule.updatedOn = groupUpdatedOn || schedule.updatedOn;
-        log.debug(`Schedule for group ${group} has been updated to:`, stringify(intervals[group]));
-        await calendarUpdate(group, today);
-      } else if (groupUpdatedOn && schedule.updatedOn !== groupUpdatedOn) {
-        schedule.updated = groupUpdatedOn;
-        schedule.updatedOn = groupUpdatedOn;
-        schedule.isActive = true;
+    if (!currentGroupData || Object.keys(currentGroupData).length === 0) {
+      log.debug(`No intervals for group ${group}, skipping.`);
+      continue;
+    }
+    const previousGroupData = previousData ? previousData.intervals[group] || {} : {};
+    if (stringify(currentGroupData) === stringify(previousGroupData)) {
+      log.debug(`No changes in schedule for group ${group}.`);
+      continue;
+    }
+    for (const dateKey of Object.keys(currentGroupData)) {
+      const currentIntervals = currentGroupData[dateKey];
+      const previousIntervals = previousGroupData[dateKey];
+      if (!previousIntervals || stringify(currentIntervals) !== stringify(previousIntervals)) {
+        log.info(`Schedule for group ${group} on ${dateKey} has been updated on ${updateTime}.`);
+        await calendarUpdate(group, currentIntervals, dateKey, todayStr, updateTime);
+      } else {
+        log.debug(`No changes in schedule for group ${group} on ${dateKey}.`);
       }
-    } else if (groupUpdateTimes[group]) {
-      groupsSchedule[group].updatedOn = groupUpdateTimes[group];
-      groupsSchedule[group].updated = groupUpdateTimes[group];
     }
   };
 }
@@ -616,16 +523,11 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
 }
 
 
-async function telegramSendUpdate(group, groupEvents) {
-  let message = textTelegramMessageHeader + ':';
-  const scheduleMeta = groupsSchedule[group];
-  if (scheduleMeta?.isActive === false && !options.ignoreStatus) {
-    message += `\n${textScheduleNotApplies}`;
-  }
-  const formattedUpdatedOn = formatUpdatedOn(scheduleMeta?.updatedOn);
-  if (formattedUpdatedOn) {
-    message += `\n${template(textScheduleUpdatedAt, { timestamp: formattedUpdatedOn })}`;
-  }
+async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedOn) {
+  const textForData = todayStr === dayStr ? textToday : textTomorrow;
+  const [y, m, d] = dayStr.split("-").map(Number);
+  const newDayStr = `${d.toString().padStart(2, '0')}.${m.toString().padStart(2, '0')}.${y}`;
+  let message = template(textScheduleUpdated, { today: textForData, date: newDayStr }) + ':';
   if (groupEvents.length === 0) {
     message += `\n${i18n.__('no outages!')}`;
   } else {
@@ -633,6 +535,9 @@ async function telegramSendUpdate(group, groupEvents) {
       message += `\n${template(textScheduleOutageDefiniteLine, { start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16) })
         }`;
     });
+  }
+  if (updatedOn) {
+    message += `\n${template(textScheduleUpdatedAt, { timestamp: formatUpdatedOn(updatedOn) })}`;
   }
   const targetTitle = telegramTargetTitles[group];
   if (targetTitle !== undefined) {
@@ -671,14 +576,14 @@ async function telegramSendUpdate(group, groupEvents) {
   }
 }
 
-async function calendarUpdate(group, today) {
-  const groupSchedule = groupsSchedule[group];
-  const eventsNew = prepareCalendarEvents(group, today, groupSchedule.schedule, groupSchedule.updatedOn);
+async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn) {
+  const eventsNew = prepareCalendarEvents(group, dayStr, intervals, updatedOn);
   log.debug('Events new:', stringify(eventsNew));
   const auth = await authenticateToCalendar(await readPrivateKey());
   const calendar = google.calendar('v3');
   const calendarId = cache.getItem(`calendarIdGroup${group}`);
-  const events = await getCalendarEvents(calendar, auth, calendarId, today);
+  const day = parseDateStringAsLocal(dayStr);
+  const events = await getCalendarEvents(calendar, auth, calendarId, day);
   log.debug('Events:', stringify(events));
   const { eventsToDelete, eventsToAdd } = compareCalendarEvents(events, eventsNew);
   log.debug('Events to delete:', stringify(eventsToDelete));
@@ -686,7 +591,7 @@ async function calendarUpdate(group, today) {
   await calendarEventsDelete(calendar, auth, calendarId, eventsToDelete);
   await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd);
   if (eventsToDelete.length > 0 || eventsToAdd.length > 0) {
-    await telegramSendUpdate(group, eventsNew);
+    await telegramSendUpdate(group, todayStr, dayStr, eventsNew, updatedOn);
   }
 }
 
