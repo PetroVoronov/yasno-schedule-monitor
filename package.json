@@ -35,7 +35,7 @@
     "help": "node src/index.js --help"
   },
   "devDependencies": {
-    "@babel/core": "^7.28.4",
+    "@babel/core": "^7.28.5",
     "@babel/eslint-parser": "^7.28.4",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-sonarjs": "^3.0.5",
