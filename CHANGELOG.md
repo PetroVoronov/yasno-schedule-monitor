@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.0...v0.8.1) (2025-10-25)
+
+### Bug Fixes
+
+* **schedule:** skip Telegram notifications when all events are in the past (filter out past events) ([567d2ba](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/567d2ba79a96e0d7590d86e039413364c60667dd))
+
+### Code Refactoring
+
+* **schedule:** remove previousData diffing and simplify update flow ([9ba0b95](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/9ba0b95b4c7273486a5f000a2d03803d8d85b03a))
+
 ## [0.8.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.7.1...v0.8.0) (2025-10-25)
 
 ### Features
