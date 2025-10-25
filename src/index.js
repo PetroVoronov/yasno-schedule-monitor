@@ -12,10 +12,12 @@ const { name: scriptName, version: scriptVersion } = require('./version');
 const i18n = require('./modules/i18n/i18n.config');
 const axios = require('axios');
 const fs = require('node:fs');
-const { parseISO } = require('date-fns');
 const { toZonedTime, format: formatTz } = require('date-fns-tz');
 const template = require('string-template');
 const { google } = require('googleapis');
+
+
+const timeZone = 'Europe/Kiev'; // Replace with your desired time zone
 
 const parsedArgs = yargsParser(process.argv.slice(2), {
   alias: {
@@ -74,6 +76,7 @@ const options = {
   ignoreStatus: Boolean(parsedArgs.ignoreStatus ?? parsedArgs['ignore-status']),
 };
 
+log.setTimeZone(timeZone);
 if (options.debug) {
   log.setLevel('debug');
 }
@@ -122,7 +125,6 @@ const textScheduleNotApplies = i18n.__('Schedule not in effect yet.');
 
 
 
-const timeZone = 'Europe/Kiev'; // Replace with your desired time zone
 
 let telegramClient = null;
 let telegramTargetEntities = {};
@@ -173,6 +175,7 @@ async function checkForUpdates() {
   let currentData;
   const today = toZonedTime(new Date(), timeZone);
   const todayStr = formatDateInZone(today, timeZone);
+  log.debug(`Checking for updates, today is ${todayStr} ...`);
   try {
     const response = await axios.get(yasnoApiUrl);
     currentData = transformPlannedOutages(response.data, todayStr);
@@ -198,7 +201,7 @@ async function checkForUpdates() {
   }
 }
 
-function transformPlannedOutages(payload, todayDateStr) {
+function transformPlannedOutages(payload, todayStr) {
   if (!payload || typeof payload !== 'object') {
     return null;
   }
@@ -211,9 +214,11 @@ function transformPlannedOutages(payload, todayDateStr) {
     const groupData = payload[group];
     if (!groupData) {
       log.warn(`No planned outage data returned for group ${group}`);
-      intervals[group] = [];
-      groupStatuses[group] = false;
+      intervals[group] =  {todayStr: []};
+      groupUpdates[group] = new Date();
       continue;
+    } else {
+      intervals[group] = {};
     }
 
     const groupUpdatedOn = new Date(groupData.updatedOn);
@@ -222,18 +227,11 @@ function transformPlannedOutages(payload, todayDateStr) {
       continue;
     }
     groupUpdates[group] = groupUpdatedOn;
-    for (const dayKey of ['today', 'tomorrow']) {
+    for (const dayKey of Object.keys(groupData)) {
 
       const dayData = groupData[dayKey];
       if (!dayData || !Array.isArray(dayData.slots)) {
-        intervals[group] = [];
-        groupStatuses[group] = false;
         continue;
-      }
-
-      const scheduleApplies = String(dayData.status || '').toLowerCase() === 'scheduleapplies'.toLowerCase();
-      if (!scheduleApplies && !options.ignoreStatus) {
-        log.info(`Schedule does not apply for group ${group} on ${dayKey}.`);
       }
 
       const dayValue = new Date(dayData.date);
@@ -241,25 +239,27 @@ function transformPlannedOutages(payload, todayDateStr) {
         log.warn(`Invalid date value for group ${group} on ${dayKey}: ${dayData.date}`);
         continue;
       }
-
+      
       const dayDateStr = formatDateInZone(dayValue, timeZone);
-      if (parseInt(dayDateStr, 10) < parseInt(todayDateStr, 10)) {
-        log.info(`Day ${dayDateStr} is in the past for group ${group}.`);
+      intervals[group][dayDateStr] = [];
+  
+      const scheduleApplies = String(dayData.status || '').toLowerCase() === 'scheduleapplies'.toLowerCase();
+      if (!scheduleApplies && !options.ignoreStatus) {
+        log.debug(`Schedule does not apply for group ${group} on ${dayKey} (${dayData.date}).`);
         continue;
       }
-      if (!Array.isArray(intervals[group])) {
-        intervals[group] = [];
+
+      if (parseInt(dayDateStr, 10) < parseInt(todayStr, 10)) {
+        log.debug(`Day ${dayDateStr} is in the past for group ${group} on ${dayKey}.`);
+        continue;
       }
       intervals[group][dayDateStr] = buildIntervalsFromSlots(dayData.slots);
     }
   }
 
-  const groupUpdatesSignature = stringify(groupUpdates);
-
   return {
     intervals,
-    groupUpdates,
-    groupUpdatesSignature,
+    groupUpdates
   };
 }
 
@@ -271,32 +271,6 @@ function formatDateInZone(date = new Date(), timeZone = "Europe/Kiev") {
     timeZone
   });
   return formatter.format(date); // "YYYY-MM-DD"
-}
-
-
-function determineScheduleDay(payload) {
-  const availableGroups = groups.length > 0 ? groups : Object.keys(payload);
-  if (availableGroups.length === 0) {
-    return null;
-  }
-
-  const dayPreference = [
-    { key: 'today', predicate: (day) => day?.status === 'ScheduleApplies' },
-    { key: 'today', predicate: (day) => Boolean(day) },
-    { key: 'tomorrow', predicate: (day) => day?.status === 'ScheduleApplies' },
-    { key: 'tomorrow', predicate: (day) => Boolean(day) },
-  ];
-
-  for (const { key, predicate } of dayPreference) {
-    for (const group of availableGroups) {
-      const day = payload[group]?.[key];
-      if (day && day.date && predicate(day)) {
-        return { dayKey: key, date: day.date };
-      }
-    }
-  }
-
-  return null;
 }
 
 function buildIntervalsFromSlots(slots) {
@@ -334,9 +308,6 @@ function buildIntervalsFromSlots(slots) {
   return mergedIntervals;
 }
 
-function dateToString(date) {
-  return date.toLocaleString('uk-UA', { timeZone: timeZone }).slice(0, 10);
-}
 
 function parseDateStringAsLocal(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -541,36 +512,36 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
   }
   const targetTitle = telegramTargetTitles[group];
   if (targetTitle !== undefined) {
-    telegramSendMessage(group, message).then((messageId) => {
-      const cacheIdLastMessageId = `lastMessageIdGroup${group}`;
-      const previousMessageId = cache.getItem(cacheIdLastMessageId, 'number');
-      cache.setItem(cacheIdLastMessageId, messageId);
-      if (options.pinMessage) {
-        telegramPinMessage(group, messageId)
-          .then(() => {
-            log.debug(`Telegram message with id: ${messageId} pinned to "${targetTitle}" with topic ${telegramTopicId}`);
+    try {
+      const messageId = await telegramSendMessage(group, message);
+      if (messageId !== null) {
+        const cacheIdLastMessageId = `lastMessageIdGroup${group}`;
+        const previousMessageId = cache.getItem(cacheIdLastMessageId, 'number');
+        cache.setItem(cacheIdLastMessageId, messageId);
+        if (options.pinMessage) {
+          try {
+            await telegramPinMessage(group, messageId)
+            log.debug(`Telegram message for group ${group} with id: ${messageId} pinned to "${targetTitle}" with topic ${telegramTopicId}`);
             if (options.unpinPrevious) {
               if (previousMessageId !== undefined && previousMessageId !== null) {
-                telegramUnpinMessage(group, previousMessageId)
-                  .then(() => {
-                    log.debug(
-                      `Telegram message with id: ${previousMessageId} unpinned from "${targetTitle}" with topic ${telegramTopicId}`,
-                    );
-                  })
-                  .catch((error) => {
-                    log.error(`Telegram message unpin error: ${error}`);
-                  });
+                try {
+                  await telegramUnpinMessage(group, previousMessageId);
+                  log.debug(
+                    `Telegram message for group ${group} with id: ${previousMessageId} unpinned from "${targetTitle}" with topic ${telegramTopicId}`,
+                  );
+                } catch (error) {
+                  log.error(`Error unpinning Telegram message for group ${group} in "${targetTitle}": ${error}`);
+                }
               }
             }
-          })
-          .catch((error) => {
-            log.error(`Telegram message pin error: ${error}`);
-          });
+          } catch (error) {
+            log.error(`Error pinning Telegram message for group ${group} in "${targetTitle}": ${error}`);
+          }
+        }
       }
-    })
-      .catch((error) => {
-        log.error(`Telegram message error: ${error}`);
-      });
+    } catch (error) {
+      log.error(`Error sending Telegram message for group ${group} to "${targetTitle}": ${error}`);
+    }
   } else {
     log.debug(`Telegram is not configured for group ${group}`);
   }
@@ -843,8 +814,9 @@ function telegramSendMessage(group, messageText) {
       telegramClient
         .sendMessage(telegramTarget, telegramMessage, messageOptions)
         .then((message) => {
-          log.debug(`Telegram message sent to "${telegramTargetTitle}" with topic ${telegramTopicId}`);
-          resolve(options.asUser === true ? message.id : message.message_id);
+          const messageId = options.asUser === true ? message.id : message.message_id;
+          log.debug(`Telegram message sent to "${telegramTargetTitle}" with topic ${telegramTopicId} with messageId: ${messageId}`);
+          resolve(messageId);
         })
         .catch((error) => {
           reject(error);
