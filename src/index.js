@@ -493,13 +493,25 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
   const [y, m, d] = dayStr.split("-").map(Number);
   const newDayStr = `${d.toString().padStart(2, '0')}.${m.toString().padStart(2, '0')}.${y}`;
   let message = template(textScheduleUpdated, { today: textForData, date: newDayStr }) + ':';
+  let sendingNeeded = true;
   if (groupEvents.length === 0) {
     message += `\n${i18n.__('no outages!')}`;
   } else {
+    sendingNeeded = false;
+    const dateNow = new Date();
     groupEvents.forEach((event) => {
+      const eventEnd = new Date(event.end.dateTime);
+      if (eventEnd <= dateNow) {
+        return;
+      }
+      sendingNeeded = true;
       message += `\n${template(textScheduleOutageDefiniteLine, { start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16) })
         }`;
     });
+  }
+  if (!sendingNeeded) {
+    log.debug(`No upcoming events for group ${group} on ${dayStr}, skipping Telegram notification.`);
+    return;
   }
   if (updatedOn) {
     message += `\n${template(textScheduleUpdatedAt, { timestamp: formatUpdatedOn(updatedOn) })}`;
