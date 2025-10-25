@@ -236,6 +236,8 @@ function transformPlannedOutages(payload, todayStr) {
         continue;
       }
 
+      log.debug(`Processing day data for group ${group} on ${dayKey}: ${stringify(dayData)}`);
+
       const dayValue = new Date(dayData.date);
       if (Number.isNaN(dayValue.getTime())) {
         log.warn(`Invalid date value for group ${group} on ${dayKey}: ${dayData.date}`);
@@ -243,6 +245,14 @@ function transformPlannedOutages(payload, todayStr) {
       }
       
       const dayDateStr = formatDateInZone(dayValue, timeZone);
+      if (!dayDateStr || dayDateStr.length === 0) {
+        log.warn(`Unable to format date string for group ${group} on ${dayKey}: ${dayData.date}`);
+        continue;
+      }
+      if (intervals[group].hasOwnProperty(dayDateStr)){
+        log.debug(`Intervals for group ${group} on ${dayDateStr} already processed, skipping duplicate.`);
+        continue;
+      }
       intervals[group][dayDateStr] = [];
       log.debug(`Processing group ${group} for day ${dayKey} with date string ${dayDateStr} ...`);
   
