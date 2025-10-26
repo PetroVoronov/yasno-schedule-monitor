@@ -362,7 +362,11 @@ function formatUpdatedOn(timestamp) {
   if (Number.isNaN(date.getTime())) {
     return null;
   }
-  return formatTz(date, 'dd.MM.yyyy HH:mm', { timeZone });
+  return new Intl.DateTimeFormat('uk-UA', {
+    timeZone: timeZone,
+    dateStyle: 'short',
+    timeStyle: 'short'
+  }).format(date);
 }
 
 async function processScheduleUpdate(
