@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.3...v0.8.4) (2025-10-26)
+
+
+### Bug Fixes
+
+* **schedule:** use payload date string for day key and normalize date comparison ([638b009](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/638b0091e0afd6dbce613184c85d383b584bdd34))
+
 ## [0.8.3](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.2...v0.8.3) (2025-10-26)
 
 ### Bug Fixes
