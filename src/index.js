@@ -244,7 +244,7 @@ function transformPlannedOutages(payload, todayStr) {
         continue;
       }
       
-      const dayDateStr = formatDateInZone(dayValue, timeZone);
+      const dayDateStr = dayData.date.split('T')[0];
       if (!dayDateStr || dayDateStr.length === 0) {
         log.warn(`Unable to format date string for group ${group} on ${dayKey}: ${dayData.date}`);
         continue;
@@ -263,7 +263,7 @@ function transformPlannedOutages(payload, todayStr) {
       }
       log.debug(`Schedule applies for group ${group} on ${dayKey} (${dayData.date}).`);
 
-      if (parseInt(dayDateStr, 10) < parseInt(todayStr, 10)) {
+      if (parseInt(dayDateStr.replace(/-/g, ''), 10) < parseInt(todayStr.replace(/-/g, ''), 10)) {
         log.debug(`Day ${dayDateStr} is in the past for group ${group} on ${dayKey}.`);
         continue;
       }
