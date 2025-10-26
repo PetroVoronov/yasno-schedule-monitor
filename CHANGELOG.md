@@ -2,7 +2,6 @@
 
 ## [0.8.3](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.2...v0.8.3) (2025-10-26)
 
-
 ### Bug Fixes
 
 * **schedule:** format updatedOn using Intl.DateTimeFormat with timeZone ([5e1decd](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5e1decd7eb8be85b34e2f3477bc5d805b40fc360))
