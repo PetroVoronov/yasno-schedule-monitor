@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.5](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.4...v0.8.5) (2025-10-31)
+
+
+### Code Refactoring
+
+* **cli:** migrate from yargs-parser to commander and validate schedule interval ([0d8ce71](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/0d8ce71c88e8996efe89f2811214eed836e24268))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump axios to ^1.13.1 and refresh package-lock (update @messageformat/runtime to 3.0.2) ([b735456](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/b735456afb0b3196c1f728f2c33026f393480034))
+
 ## [0.8.4](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.3...v0.8.4) (2025-10-26)
 
 ### Bug Fixes
