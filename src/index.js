@@ -112,6 +112,7 @@ let telegramTargetTitles = {};
 let cachedPrivateKey = null;
 let cachedCalendarAuth = null;
 let cachedCalendarService = null;
+const calendarEventsCache = new Map();
 
 const botAuthTokenMinimumLength = 43;
 
@@ -353,6 +354,20 @@ function formatUpdatedOn(timestamp) {
   }).format(date);
 }
 
+function buildCalendarEventsCacheKey(calendarId, dayStr) {
+  return `${calendarId}:${dayStr}`;
+}
+
+function setCalendarEventsCache(calendarId, dayStr, events) {
+  const cacheKey = buildCalendarEventsCacheKey(calendarId, dayStr);
+  calendarEventsCache.set(cacheKey, events);
+}
+
+function clearCalendarEventsCache(calendarId, dayStr) {
+  const cacheKey = buildCalendarEventsCacheKey(calendarId, dayStr);
+  calendarEventsCache.delete(cacheKey);
+}
+
 async function processScheduleUpdate(
   currentData,
   todayStr
@@ -407,8 +422,13 @@ function getCalendarService() {
 }
 
 
-async function getCalendarEvents(calendar, auth, calendarId, today) {
+async function getCalendarEvents(calendar, auth, calendarId, today, todayStr) {
   try {
+    const cacheKey = buildCalendarEventsCacheKey(calendarId, todayStr);
+    if (calendarEventsCache.has(cacheKey)) {
+      log.debug('Returning cached calendar events for:', cacheKey);
+      return calendarEventsCache.get(cacheKey);
+    }
     const startOfDay = formatStartOfDay(today);
     const endOfDay = formatEndOfDay(today);
     const response = await calendar.events.list({
@@ -418,7 +438,9 @@ async function getCalendarEvents(calendar, auth, calendarId, today) {
       timeMax: endOfDay,
       timeZone: timeZone
     });
-    return response.data.items;
+    const items = response.data.items;
+    setCalendarEventsCache(calendarId, todayStr, items);
+    return items;
   } catch (error) {
     console.error('Error fetching calendar events:', error);
     throw error;
@@ -469,7 +491,10 @@ function compareCalendarEvents(events, eventsNew) {
   return { eventsToDelete, eventsToAdd };
 }
 
-async function calendarEventsDelete(calendar, auth, calendarId, events) {
+async function calendarEventsDelete(calendar, auth, calendarId, events, dayStr) {
+  if (!events.length) {
+    return;
+  }
   for (const event of events) {
     try {
       await calendar.events.delete({
@@ -482,9 +507,13 @@ async function calendarEventsDelete(calendar, auth, calendarId, events) {
       throw error;
     }
   }
+  clearCalendarEventsCache(calendarId, dayStr);
 }
 
-async function calendarEventsAdd(calendar, auth, calendarId, events) {
+async function calendarEventsAdd(calendar, auth, calendarId, events, dayStr) {
+  if (!events.length) {
+    return;
+  }
   for (const event of events) {
     try {
       await calendar.events.insert({
@@ -497,6 +526,7 @@ async function calendarEventsAdd(calendar, auth, calendarId, events) {
       throw error;
     }
   }
+  clearCalendarEventsCache(calendarId, dayStr);
 }
 
 
@@ -573,14 +603,17 @@ async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn) {
   const calendar = getCalendarService();
   const calendarId = cache.getItem(`calendarIdGroup${group}`);
   const day = parseDateStringAsLocal(dayStr);
-  const events = await getCalendarEvents(calendar, auth, calendarId, day);
+  const events = await getCalendarEvents(calendar, auth, calendarId, day, dayStr);
   log.debug('Events:', stringify(events));
   const { eventsToDelete, eventsToAdd } = compareCalendarEvents(events, eventsNew);
-  log.debug('Events to delete:', stringify(eventsToDelete));
-  log.debug('Events to add:', stringify(eventsToAdd));
-  await calendarEventsDelete(calendar, auth, calendarId, eventsToDelete);
-  await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd);
+  log.debug('Events: to delete:', stringify(eventsToDelete), ', to add:', stringify(eventsToAdd));
   if (eventsToDelete.length > 0 || eventsToAdd.length > 0) {
+    if (eventsToDelete.length > 0) {
+      await calendarEventsDelete(calendar, auth, calendarId, eventsToDelete, dayStr);
+    }
+    if (eventsToAdd.length > 0) {
+      await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd, dayStr);
+    }
     await telegramSendUpdate(group, todayStr, dayStr, eventsNew, updatedOn);
   }
 }
