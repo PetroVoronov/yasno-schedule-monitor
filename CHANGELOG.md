@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.6](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.5...v0.8.6) (2025-10-31)
+
+
+### Code Refactoring
+
+* **calendar:** cache private key, JWT auth and calendar service ([94928d8](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/94928d8ab5c2c451976ce7f62e0ebd738cb6bd45))
+
 ## [0.8.5](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.4...v0.8.5) (2025-10-31)
 
 ### Code Refactoring
