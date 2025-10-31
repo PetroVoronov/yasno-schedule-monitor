@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.7](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.6...v0.8.7) (2025-10-31)
+
+
+### Code Refactoring
+
+* **calendar:** cache calendar events per day and invalidate on changes ([e3728ae](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/e3728aefc2b8599a43657295448b550bc63e71f6))
+* **yasno:** detect unchanged API payloads via SHA256 checksum and skip processing ([df7a09f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/df7a09f12f0152608bb1be5d772920249fbe425b))
+
 ## [0.8.6](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.5...v0.8.6) (2025-10-31)
 
 ### Code Refactoring
