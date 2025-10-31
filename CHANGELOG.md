@@ -2,7 +2,6 @@
 
 ## [0.8.7](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.6...v0.8.7) (2025-10-31)
 
-
 ### Code Refactoring
 
 * **calendar:** cache calendar events per day and invalidate on changes ([e3728ae](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/e3728aefc2b8599a43657295448b550bc63e71f6))
