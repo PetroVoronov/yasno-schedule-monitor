@@ -109,6 +109,10 @@ let telegramClient = null;
 let telegramTargetEntities = {};
 let telegramTargetTitles = {};
 
+let cachedPrivateKey = null;
+let cachedCalendarAuth = null;
+let cachedCalendarService = null;
+
 const botAuthTokenMinimumLength = 43;
 
 const telegramParseMode = 'html';
@@ -374,18 +378,32 @@ async function processScheduleUpdate(
 }
 
 async function readPrivateKey() {
+  if (cachedPrivateKey) {
+    return cachedPrivateKey;
+  }
   const content = fs.readFileSync(keyFilePath);
-  return JSON.parse(content.toString());
+  cachedPrivateKey = JSON.parse(content.toString());
+  return cachedPrivateKey;
 }
 
 async function authenticateToCalendar(key) {
-  const jwtClient = new google.auth.JWT({
-    email: key.client_email,
-    key: key.private_key,
-    scopes: [calendarScope, calendarEventsScope],
-  });
-  await jwtClient.authorize();
-  return jwtClient;
+  if (!cachedCalendarAuth) {
+    cachedCalendarAuth = new google.auth.JWT({
+      email: key.client_email,
+      key: key.private_key,
+      scopes: [calendarScope, calendarEventsScope],
+    });
+  }
+  await cachedCalendarAuth.authorize();
+  return cachedCalendarAuth;
+}
+
+
+function getCalendarService() {
+  if (!cachedCalendarService) {
+    cachedCalendarService = google.calendar('v3');
+  }
+  return cachedCalendarService;
 }
 
 
@@ -550,8 +568,9 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
 async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn) {
   const eventsNew = prepareCalendarEvents(group, dayStr, intervals, updatedOn);
   log.debug('Events new:', stringify(eventsNew));
-  const auth = await authenticateToCalendar(await readPrivateKey());
-  const calendar = google.calendar('v3');
+  const key = await readPrivateKey();
+  const auth = await authenticateToCalendar(key);
+  const calendar = getCalendarService();
   const calendarId = cache.getItem(`calendarIdGroup${group}`);
   const day = parseDateStringAsLocal(dayStr);
   const events = await getCalendarEvents(calendar, auth, calendarId, day);
