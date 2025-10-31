@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const { toZonedTime, format: formatTz } = require('date-fns-tz');
 const template = require('string-template');
 const { google } = require('googleapis');
+const crypto = require('node:crypto');
 
 
 const timeZone = 'Europe/Kiev'; // Replace with your desired time zone
@@ -113,6 +114,7 @@ let cachedPrivateKey = null;
 let cachedCalendarAuth = null;
 let cachedCalendarService = null;
 const calendarEventsCache = new Map();
+let lastYasnoChecksum = null;
 
 const botAuthTokenMinimumLength = 43;
 
@@ -157,11 +159,17 @@ for (let group = 1; group <= 6; group++) {
 
 async function checkForUpdates() {
   let currentData;
+  let payloadChecksum = null;
   const today = toZonedTime(new Date(), timeZone);
   const todayStr = formatDateInZone(today, timeZone);
   log.debug(`Checking for updates, today is ${todayStr} ...`);
   try {
     const response = await axios.get(yasnoApiUrl);
+    payloadChecksum = calculateChecksum(response.data);
+    if (payloadChecksum && payloadChecksum === lastYasnoChecksum) {
+      log.debug('Yasno payload unchanged (checksum match), skipping processing.');
+      return;
+    }
     currentData = transformPlannedOutages(response.data, todayStr);
     if (!currentData) {
       log.error('Unable to process planned outage payload.');
@@ -179,6 +187,9 @@ async function checkForUpdates() {
 
   try {
     await processScheduleUpdate(currentData, todayStr);
+    if (payloadChecksum) {
+      lastYasnoChecksum = payloadChecksum;
+    }
   } catch (error) {
     log.error('Failed to process planned outage update:', error?.stack || error);
   }
@@ -352,6 +363,15 @@ function formatUpdatedOn(timestamp) {
     dateStyle: 'short',
     timeStyle: 'short'
   }).format(date);
+}
+
+function calculateChecksum(payload) {
+  try {
+    return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  } catch (error) {
+    log.error('Unable to calculate Yasno payload checksum:', error);
+    return null;
+  }
 }
 
 function buildCalendarEventsCacheKey(calendarId, dayStr) {
