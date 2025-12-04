@@ -160,8 +160,7 @@ for (let group = 1; group <= 6; group++) {
 async function checkForUpdates() {
   let currentData;
   let payloadChecksum = null;
-  const today = toZonedTime(new Date(), timeZone);
-  const todayStr = formatDateInZone(today, timeZone);
+  const todayStr = formatDateInZone();
   log.debug(`Checking for updates, today is ${todayStr} ...`);
   try {
     const response = await axios.get(yasnoApiUrl);
@@ -388,10 +387,7 @@ function clearCalendarEventsCache(calendarId, dayStr) {
   calendarEventsCache.delete(cacheKey);
 }
 
-async function processScheduleUpdate(
-  currentData,
-  todayStr
-) {
+async function processScheduleUpdate(currentData, todayStr) {
   const groupUpdateTimes = currentData.groupUpdates || {};
   for (const group of groups) {
     const currentGroupData = currentData.intervals[group] || {};
