@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.8](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.7...v0.8.8) (2025-12-04)
+
+
+### Bug Fixes
+
+* **yasno:** today string creation ([4107525](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/41075254e8234fa84dc7cf2eea79a72dd5cbf8a2))
+
+
+### Code Refactoring
+
+* **yasno:** add more debug for telegramSendUpdate ([5aa6569](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5aa6569fd02416f1f70b29a26754d0e6c7c2f001))
+
+
+### Build System
+
+* **deps-dev:** bump globals from 16.4.0 to 16.5.0 ([cda9bc3](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/cda9bc3afd51f222dd0ab157278a18fc2775c50f))
+* **deps-dev:** bump globals from 16.4.0 to 16.5.0 ([f5d4b91](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/f5d4b911bd841e967a4d14076afd26b34aeb1d91))
+* **deps:** bump axios from 1.13.1 to 1.13.2 ([543e152](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/543e152676edd61bfcc24dcac9f0d21865420690))
+* **deps:** bump axios from 1.13.1 to 1.13.2 ([05c7ed9](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/05c7ed99c2a08d43bec9d891c737765e914de938))
+* **deps:** bump commander from 12.1.0 to 14.0.2 ([80d28b2](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/80d28b21ac37c6b5c7b45e6639348d5282f2ba8f))
+* **deps:** bump commander from 12.1.0 to 14.0.2 ([cc77a8e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/cc77a8ee7a31c9f2ffca4648463ec49b71068f9b))
+* **deps:** bump i18n from 0.15.2 to 0.15.3 ([7032e15](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/7032e156175186cc587525f239f52480f5841b21))
+
 ## [0.8.7](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.6...v0.8.7) (2025-10-31)
 
 ### Code Refactoring
