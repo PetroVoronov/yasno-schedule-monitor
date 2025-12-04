@@ -2,16 +2,13 @@
 
 ## [0.8.8](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.7...v0.8.8) (2025-12-04)
 
-
 ### Bug Fixes
 
 * **yasno:** today string creation ([4107525](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/41075254e8234fa84dc7cf2eea79a72dd5cbf8a2))
 
-
 ### Code Refactoring
 
 * **yasno:** add more debug for telegramSendUpdate ([5aa6569](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5aa6569fd02416f1f70b29a26754d0e6c7c2f001))
-
 
 ### Build System
 
