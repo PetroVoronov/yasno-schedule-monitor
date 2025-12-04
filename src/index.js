@@ -547,6 +547,7 @@ async function calendarEventsAdd(calendar, auth, calendarId, events, dayStr) {
 
 
 async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedOn) {
+  log.debug(`Sending message for group ${group} for day ${dayStr}. Today is ${todayStr}.`)
   const textForData = todayStr === dayStr ? textToday : textTomorrow;
   const [y, m, d] = dayStr.split("-").map(Number);
   const newDayStr = `${d.toString().padStart(2, '0')}.${m.toString().padStart(2, '0')}.${y}`;
