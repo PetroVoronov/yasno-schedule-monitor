@@ -41,7 +41,7 @@
     "eslint-plugin-sonarjs": "^3.0.5",
     "globals": "^16.5.0",
     "jest": "^30.2.0",
-    "markdownlint-cli2": "^0.18.1"
+    "markdownlint-cli2": "^0.19.1"
   },
   "overrides": {
     "whatwg-url": "^14.0.0"
