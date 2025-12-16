@@ -102,6 +102,7 @@ const textTomorrow = i18n.__('tomorrow');
 const textScheduleOutageDefiniteLine = i18n.__('- off: {start} - {end}');
 const textScheduleUpdatedAt = i18n.__('Data updated at {timestamp}');
 const textScheduleNotApplies = i18n.__('Schedule not in effect yet.');
+const statusesWithScheduleApplied = ['scheduleapplies', 'emergencyshutdowns'];
 
 
 
@@ -251,8 +252,8 @@ function transformPlannedOutages(payload, todayStr) {
       intervals[group][dayDateStr] = [];
       log.debug(`Processing group ${group} for day ${dayKey} with date string ${dayDateStr} ...`);
   
-      const scheduleApplies = String(dayData.status || '').toLowerCase() === 'scheduleapplies'.toLowerCase();
-      if (!scheduleApplies && !options.ignoreStatus) {
+      const currentStatus = String(dayData.status || '').toLowerCase();
+      if (!statusesWithScheduleApplied.includes(currentStatus) && !options.ignoreStatus) {
         log.debug(`Schedule does not apply for group ${group} on ${dayKey} (${dayData.date}).`);
         continue;
       }
