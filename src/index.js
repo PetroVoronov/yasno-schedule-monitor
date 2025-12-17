@@ -154,8 +154,13 @@ for (let group = 1; group <= 6; group++) {
       groups.push(groupId);
     }
   }
-
 };
+
+let knownYasnoStatuses = cache.getItem(`knownYasnoStatuses`);
+if (!knownYasnoStatuses || typeof knownYasnoStatuses !== 'object') {
+  knownYasnoStatuses = {};
+  cache.setItem(`knownYasnoStatuses`, knownYasnoStatuses);
+}
 
 
 async function checkForUpdates() {
@@ -208,7 +213,7 @@ function transformPlannedOutages(payload, todayStr) {
     const groupData = payload[group];
     if (!groupData) {
       log.warn(`No planned outage data returned for group ${group}`);
-      intervals[group] =  {todayStr: []};
+      intervals[group] = { todayStr: [] };
       groupUpdates[group] = new Date();
       continue;
     } else {
@@ -239,19 +244,24 @@ function transformPlannedOutages(payload, todayStr) {
         log.warn(`Invalid date value for group ${group} on ${dayKey}: ${dayData.date}`);
         continue;
       }
-      
+
       const dayDateStr = dayData.date.split('T')[0];
       if (!dayDateStr || dayDateStr.length === 0) {
         log.warn(`Unable to format date string for group ${group} on ${dayKey}: ${dayData.date}`);
         continue;
       }
-      if (intervals[group].hasOwnProperty(dayDateStr)){
+      if (intervals[group].hasOwnProperty(dayDateStr)) {
         log.debug(`Intervals for group ${group} on ${dayDateStr} already processed, skipping duplicate.`);
         continue;
       }
       intervals[group][dayDateStr] = [];
       log.debug(`Processing group ${group} for day ${dayKey} with date string ${dayDateStr} ...`);
-  
+
+      if (!knownYasnoStatuses.hasOwnProperty(dayData.status)) {
+        knownYasnoStatuses[dayData.status] = dayData;
+        log.info(`New Yasno status encountered: ${dayData.status} for group ${group} on ${dayKey}. Added to known statuses.`);
+        cache.setItem(`knownYasnoStatuses`, knownYasnoStatuses);
+      }
       const currentStatus = String(dayData.status || '').toLowerCase();
       if (!statusesWithScheduleApplied.includes(currentStatus) && !options.ignoreStatus) {
         log.debug(`Schedule does not apply for group ${group} on ${dayKey} (${dayData.date}).`);
