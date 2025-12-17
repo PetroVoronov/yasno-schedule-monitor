@@ -2,23 +2,19 @@
 
 ## [0.9.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.8.8...v0.9.0) (2025-12-17)
 
-
 ### Features
 
 * add caching for known Yasno statuses and log new statuses encountered ([5217928](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5217928ce0c7a90d08d898cbb4c48ed0914053d0))
-
 
 ### Bug Fixes
 
 * **build:** launch.json adopted to work with nvm ([409023f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/409023f89bb3033e29aaeb51b13ebedb5b0de0b1))
 * update status check logic to include additional statuses for schedule application ([03f8b81](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/03f8b81ce177f15ed5d72d1985c94bc1f2a3800d))
 
-
 ### Build System
 
 * **deps:** bump grammy from 1.38.3 to 1.38.4 ([9e85ab0](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/9e85ab06d8bf47bb2e8dd60faa268cfaae1349c5))
 * **deps:** bump node from 23-alpine to 25-alpine ([a1e3b53](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/a1e3b5392936e47559d83e2b3679211c5a3fa7a8))
-
 
 ### Miscellaneous Chores
 
