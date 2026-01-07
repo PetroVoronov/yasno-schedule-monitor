@@ -80,6 +80,7 @@ log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
 
 const yasnoApiUrl = 'https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages';
 const yasnoMainUrl = 'https://static.yasno.ua/kyiv/outages';
+const svitlobotApiUrl = 'https://api.svitlobot.in.ua/';
 
 const storage = new LocalStorage('data/storage');
 const cache = new Cache({
@@ -148,6 +149,9 @@ for (let group = 1; group <= 6; group++) {
     }
     if (typeof process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`] === 'string' && process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`].length > 0) {
       cache.setItem(`telegramTopicIdGroup${groupId}`, parseInt(process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`]));
+    }
+    if (typeof process.env[`SVITLOBOT_CHANNEL_ID_GROUP_${envId}`] === 'string' && process.env[`SVITLOBOT_CHANNEL_ID_GROUP_${envId}`].length > 0) {
+      cache.setItem(`svitlobotChannelIdGroup${groupId}`, process.env[`SVITLOBOT_CHANNEL_ID_GROUP_${envId}`]);
     }
     const calendarId = cache.getItem(`calendarIdGroup${groupId}`);
     if (typeof calendarId === 'string' && calendarId.length > 0) {
@@ -381,6 +385,126 @@ function calculateChecksum(payload) {
   } catch (error) {
     log.error('Unable to calculate Yasno payload checksum:', error);
     return null;
+  }
+}
+
+// -------- External timetable helpers (weekly, day-of-week based) --------
+
+function dayOfWeekIndexFromDateStr(dateStr) {
+  // JS getDay(): 0=Sunday..6=Saturday; map to Monday=0..Sunday=6
+  const date = parseDateStringAsLocal(dateStr);
+  const jsDay = date.getDay();
+  return (jsDay + 6) % 7;
+}
+
+function buildEmptyWeeklyArray() {
+  return Array.from({ length: 7 }, () => Array(24).fill(0));
+}
+
+function serializeWeeklyArray(weekly) {
+  // Same format used by timetable editor: concatenate 24 digits per day and end day with ';'
+  return weekly.map((row) => row.map((v) => {
+    const n = parseInt(v);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    if (n > 3) return 3;
+    return n;
+  }).join('')).join(';') + ';';
+}
+
+function intervalsToDayStates(intervals) {
+  // intervals: [{ startMinutes, endMinutes }]
+  const states = new Array(24).fill(0);
+  for (let h = 0; h < 24; h++) {
+    const firstStart = h * 60;
+    const firstEnd = h * 60 + 30;
+    const secondStart = h * 60 + 30;
+    const secondEnd = (h + 1) * 60;
+
+    let first = false;
+    let second = false;
+
+    for (const interval of intervals || []) {
+      const s = interval.startMinutes;
+      const e = interval.endMinutes;
+      if (!(Number.isFinite(s) && Number.isFinite(e)) || e <= s) continue;
+      // overlap if start < endOfHalf and end > startOfHalf
+      if (s < firstEnd && e > firstStart) first = true;
+      if (s < secondEnd && e > secondStart) second = true;
+      if (first && second) break;
+    }
+
+    states[h] = (first && second) ? 1 : (first ? 2 : (second ? 3 : 0));
+  }
+  return states;
+}
+
+async function fetchExternalTimetableWeekly(svitlobotChannelId) {
+  const url = `${svitlobotApiUrl}website/getChannelTimetable?channel_key=${encodeURIComponent(svitlobotChannelId)}`;
+  const response = await axios.get(url);
+  const data = String(response.data || '');
+  if (!data.includes(';&&&;')) {
+    // Unexpected format, return empty weekly
+    return buildEmptyWeeklyArray();
+  }
+  const parts = data.split(';&&&;');
+  const arrData = parts[1]?.trim();
+  if (!arrData || arrData === 'no data') {
+    return buildEmptyWeeklyArray();
+  }
+  try {
+    const parsed = JSON.parse(arrData);
+    // Validate structure
+    if (Array.isArray(parsed) && parsed.length === 7 && parsed.every((row) => Array.isArray(row) && row.length === 24)) {
+      return parsed.map((row) => row.map((v) => parseInt(v) || 0));
+    }
+  } catch (error) {
+    log.warn('Failed to parse external timetable JSON, will use empty weekly:', error);
+  }
+  return buildEmptyWeeklyArray();
+}
+
+async function postExternalTimetableWeekly(svitlobotChannelId, weekly) {
+  const timetableData = serializeWeeklyArray(weekly);
+  const url = `${svitlobotApiUrl}website/timetableEditEvent?channel_key=${encodeURIComponent(svitlobotChannelId)}&timetableData=${encodeURIComponent(timetableData)}`;
+  const response = await axios.get(url);
+  return String(response.data || '').trim() === 'ok';
+}
+
+async function reflectExternalTimetable(group, dayStr, todayStr, intervals) {
+  const svitlobotChannelIds = cache.getItem(`svitlobotChannelIdGroup${group}`, 'string');
+  if (svitlobotChannelIds === null || svitlobotChannelIds.length === undefined) return;
+
+  const svitlobotChannelIdsArray = svitlobotChannelIds.split(',').map((id) => id.trim()).filter((id) => id.length > 0);
+  for (const svitlobotChannelId of svitlobotChannelIdsArray) {
+    try {
+
+      let weekly;
+      try {
+        weekly = await fetchExternalTimetableWeekly(svitlobotChannelId);
+      } catch (error) {
+        log.warn('Failed to fetch external timetable, will initialize empty weekly:', error);
+        weekly = buildEmptyWeeklyArray();
+      }
+
+      const weekdayIndex = dayOfWeekIndexFromDateStr(dayStr);
+      const isTomorrow = todayStr !== dayStr;
+      // If tomorrow is Monday, clear the entire weekly schedule before reflecting
+      if (isTomorrow && weekdayIndex === 0) {
+        weekly = buildEmptyWeeklyArray();
+      }
+
+      const newStates = intervalsToDayStates(intervals);
+      weekly[weekdayIndex] = newStates;
+
+      const ok = await postExternalTimetableWeekly(svitlobotChannelId, weekly);
+      if (ok) {
+        log.info(`External timetable updated for group ${group} on weekday ${weekdayIndex} (${dayStr}).`);
+      } else {
+        log.warn(`External timetable update for group ${group} on weekday ${weekdayIndex} returned non-ok.`);
+      }
+    } catch (error) {
+      log.error('Failed to reflect external timetable:', error);
+    }
   }
 }
 
@@ -643,6 +767,8 @@ async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn) {
       await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd, dayStr);
     }
     await telegramSendUpdate(group, todayStr, dayStr, eventsNew, updatedOn);
+    // Reflect changes on external weekly timetable site for subgroup 1.1
+    await reflectExternalTimetable(group, dayStr, todayStr, intervals);
   }
 }
 
