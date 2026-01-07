@@ -14,7 +14,8 @@
             ],
             "program": "${workspaceFolder}/src/index.js",
             "runtimeExecutable": "node",
-            "args": ["-d"]
+            "args": ["-d"],
+            "envFile": "${workspaceFolder}/.env"
         }
     ]
 }
