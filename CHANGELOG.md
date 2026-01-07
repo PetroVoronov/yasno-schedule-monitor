@@ -2,23 +2,19 @@
 
 ## [0.10.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.9.0...v0.10.0) (2026-01-07)
 
-
 ### Features
 
 * enhance outage messaging and status tracking in schedule updates ([63ecf88](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/63ecf888aa03cc37af9fbedebcb0d74c7707e12c))
 * integrate svitlobot API for external timetable management ([73d9f4a](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/73d9f4acbe0a5b971780e830b6250c81c3642d79))
-
 
 ### Bug Fixes
 
 * add missing envFile configuration in launch.json ([3d1460a](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/3d1460a4eb05a632140ab834e24c53205a81406a))
 * qs  &lt;6.14.1 ([b19df18](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/b19df18ea63d3901385293a98b1411d35ea3bad9))
 
-
 ### Code Refactoring
 
 * replace telegram dependency with teleproto and update related imports ([c7a6c12](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/c7a6c1290fe445d8badffffc550fc3aa7e1bdfdf))
-
 
 ### Build System
 
