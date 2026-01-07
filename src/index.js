@@ -1,6 +1,6 @@
-const { Api, TelegramClient } = require('telegram');
+const { Api, TelegramClient } = require('teleproto');
 const { Api: GrammyApi } = require('grammy');
-const { StringSession, StoreSession } = require('telegram/sessions');
+const { StringSession, StoreSession } = require('teleproto/sessions');
 const readline = require('node:readline/promises');
 const { stdin: input, stdout: output, exit } = require('node:process');
 const stringify = require('json-stringify-safe');
@@ -946,12 +946,13 @@ function getTelegramTargetEntity(group) {
               if (telegramTopicId > 0) {
                 telegramClient
                   .invoke(
-                    new Api.channels.GetForumTopics({
-                      channel: targetDialog.entity,
+                    new Api.messages.GetForumTopics({
+                      peer: targetDialog.entity,
+                      q: "",
                       limit: 100,
                       offsetId: 0,
                       offsetDate: 0,
-                      addOffset: 0,
+                      offsetTopic: 0,
                     }),
                   )
                   .then((response) => {
