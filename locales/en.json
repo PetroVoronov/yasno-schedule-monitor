@@ -6,6 +6,7 @@
 	"tomorrow": "tomorrow",
 	"- off: {start} - {end}": "- 🕯 : {start} - {end}",
 	"no outages!": "no outages!",
+	"emergency outages! Schedule is not available!": "emergency outages! Schedule is not available!",
 	"Data updated at {timestamp}": "Data updated at {timestamp}",
 	"Schedule not in effect yet.": "Schedule not in effect yet."
 }

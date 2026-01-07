@@ -6,6 +6,7 @@
     "tomorrow": "morgen",
 	"- off: {start} - {end}": "- 🕯 : {start} - {end}",
     "no outages!": "keine Ausfälle!",
+    "emergency outages! Schedule is not available!": "Notstromausfälle! Zeitplan ist nicht verfügbar!",
     "Data updated at {timestamp}": "Daten aktualisiert um {timestamp}",
     "Schedule not in effect yet.": "Plan gilt noch nicht."
 }

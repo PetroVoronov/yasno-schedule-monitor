@@ -103,6 +103,8 @@ const textTomorrow = i18n.__('tomorrow');
 const textScheduleOutageDefiniteLine = i18n.__('- off: {start} - {end}');
 const textScheduleUpdatedAt = i18n.__('Data updated at {timestamp}');
 const textScheduleNotApplies = i18n.__('Schedule not in effect yet.');
+const textScheduleNoOutages = i18n.__('no outages!');
+const textScheduleEmergencyUnavailable = i18n.__('emergency outages! Schedule is not available!');
 const statusesWithScheduleApplied = ['scheduleapplies', 'emergencyshutdowns'];
 
 
@@ -211,6 +213,7 @@ function transformPlannedOutages(payload, todayStr) {
 
   const intervals = {};
   const groupUpdates = {};
+  const statuses = {};
   const relevantGroups = groups.length > 0 ? groups : Object.keys(payload);
 
   for (const group of relevantGroups) {
@@ -219,9 +222,11 @@ function transformPlannedOutages(payload, todayStr) {
       log.warn(`No planned outage data returned for group ${group}`);
       intervals[group] = { todayStr: [] };
       groupUpdates[group] = new Date();
+      statuses[group] = {};
       continue;
     } else {
       intervals[group] = {};
+      statuses[group] = {};
     }
 
     const groupUpdatedOn = new Date(groupData.updatedOn);
@@ -267,6 +272,7 @@ function transformPlannedOutages(payload, todayStr) {
         cache.setItem(`knownYasnoStatuses`, knownYasnoStatuses);
       }
       const currentStatus = String(dayData.status || '').toLowerCase();
+      statuses[group][dayDateStr] = currentStatus;
       if (!statusesWithScheduleApplied.includes(currentStatus) && !options.ignoreStatus) {
         log.debug(`Schedule does not apply for group ${group} on ${dayKey} (${dayData.date}).`);
         continue;
@@ -284,7 +290,8 @@ function transformPlannedOutages(payload, todayStr) {
 
   return {
     intervals,
-    groupUpdates
+    groupUpdates,
+    statuses
   };
 }
 
@@ -524,6 +531,7 @@ function clearCalendarEventsCache(calendarId, dayStr) {
 
 async function processScheduleUpdate(currentData, todayStr) {
   const groupUpdateTimes = currentData.groupUpdates || {};
+  const groupStatuses = currentData.statuses || {};
   for (const group of groups) {
     const currentGroupData = currentData.intervals[group] || {};
     const updateTime = groupUpdateTimes[group];
@@ -537,8 +545,9 @@ async function processScheduleUpdate(currentData, todayStr) {
     }
     for (const dateKey of Object.keys(currentGroupData)) {
       const currentIntervals = currentGroupData[dateKey];
+      const currentStatus = groupStatuses?.[group]?.[dateKey] || null;
       log.info(`Going to check schedule for group ${group} on ${dateKey} updated on ${updateTime}.`);
-      await calendarUpdate(group, currentIntervals, dateKey, todayStr, updateTime);
+      await calendarUpdate(group, currentIntervals, dateKey, todayStr, updateTime, currentStatus);
     }
   };
 }
@@ -681,7 +690,7 @@ async function calendarEventsAdd(calendar, auth, calendarId, events, dayStr) {
 }
 
 
-async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedOn) {
+async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedOn, dayStatus) {
   log.debug(`Sending message for group ${group} for day ${dayStr}. Today is ${todayStr}.`)
   const textForData = todayStr === dayStr ? textToday : textTomorrow;
   const [y, m, d] = dayStr.split("-").map(Number);
@@ -689,7 +698,11 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
   let message = template(textScheduleUpdated, { today: textForData, date: newDayStr }) + ':';
   let sendingNeeded = true;
   if (groupEvents.length === 0) {
-    message += `\n${i18n.__('no outages!')}`;
+    if (String(dayStatus || '').toLowerCase() === 'emergencyshutdowns') {
+      message += `\n${textScheduleEmergencyUnavailable}`;
+    } else {
+      message += `\n${textScheduleNoOutages}`;
+    }
   } else {
     sendingNeeded = false;
     const dateNow = new Date();
@@ -747,7 +760,7 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
   }
 }
 
-async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn) {
+async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn, dayStatus) {
   const eventsNew = prepareCalendarEvents(group, dayStr, intervals, updatedOn);
   log.debug('Events new:', stringify(eventsNew));
   const key = await readPrivateKey();
@@ -766,7 +779,7 @@ async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn) {
     if (eventsToAdd.length > 0) {
       await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd, dayStr);
     }
-    await telegramSendUpdate(group, todayStr, dayStr, eventsNew, updatedOn);
+    await telegramSendUpdate(group, todayStr, dayStr, eventsNew, updatedOn, dayStatus);
     // Reflect changes on external weekly timetable site for subgroup 1.1
     await reflectExternalTimetable(group, dayStr, todayStr, intervals);
   }
