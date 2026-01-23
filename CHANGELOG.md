@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.0...v0.10.1) (2026-01-23)
+
+### Build System
+
+* **deps-dev:** bump @babel/core from 7.28.5 to 7.28.6 ([82092d8](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/82092d8385061b7aceb26a2ea5de3e7bccb33c12))
+* **deps-dev:** bump @babel/core from 7.28.5 to 7.28.6 ([c304a1f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/c304a1fcd6e4294297fe1d4427d8d44a0ae03a37))
+* **deps-dev:** bump @babel/eslint-parser from 7.28.5 to 7.28.6 ([aad98e9](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/aad98e981fc6768435b774a33ea1f3c9b84ed1bf))
+* **deps-dev:** bump @babel/eslint-parser from 7.28.5 to 7.28.6 ([6b78a40](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/6b78a408cd1e3949c2699ad40326176336ced9d8))
+* **deps:** bump googleapis from 164.1.0 to 170.1.0 ([64735ef](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/64735ef92ba33bb953d0f2ac22f084b56d312ee4))
+* **deps:** bump googleapis from 164.1.0 to 170.1.0 ([20de28a](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/20de28a01277528da8f04c43d8a9e14aaabceaf0))
+* **deps:** bump grammy from 1.39.2 to 1.39.3 ([111e16c](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/111e16cd80626dbc6262f22ce216c739cab99a6a))
+* **deps:** bump grammy from 1.39.2 to 1.39.3 ([5d1cb1b](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5d1cb1bf51b910e8721d310f2f1eee66186b5ba8))
+* **deps:** bump teleproto from 1.221.0 to 1.221.4 ([817e21e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/817e21e3198220d9e92d2223198d8dde2b197292))
+* **deps:** bump teleproto from 1.221.0 to 1.221.4 ([ad7ed3c](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/ad7ed3cea538669e060d3d3ea415e2bf91280038))
+
 ## [0.10.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.9.0...v0.10.0) (2026-01-07)
 
 ### Features
