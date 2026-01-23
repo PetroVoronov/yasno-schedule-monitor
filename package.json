@@ -18,7 +18,7 @@
     "commander": "^14.0.2",
     "date-fns-tz": "^3.2.0",
     "googleapis": "^164.1.0",
-    "grammy": "^1.39.2",
+    "grammy": "^1.39.3",
     "i18n": "^0.15.3",
     "json-stringify-safe": "^5.0.1",
     "logform": "^2.7.0",
