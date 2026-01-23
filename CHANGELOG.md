@@ -2,7 +2,6 @@
 
 ## [0.10.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.0...v0.10.1) (2026-01-23)
 
-
 ### Build System
 
 * **deps-dev:** bump @babel/core from 7.28.5 to 7.28.6 ([82092d8](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/82092d8385061b7aceb26a2ea5de3e7bccb33c12))
