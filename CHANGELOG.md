@@ -2,7 +2,6 @@
 
 ## [0.10.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.1...v0.10.2) (2026-01-26)
 
-
 ### Build System
 
 * **deps-dev:** bump globals from 17.0.0 to 17.1.0 ([0445e20](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/0445e20978bdc3c691493ca11caa2cecf8b8713b))
