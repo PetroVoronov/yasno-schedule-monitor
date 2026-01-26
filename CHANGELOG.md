@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.10.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.1...v0.10.2) (2026-01-26)
+
+
+### Build System
+
+* **deps-dev:** bump globals from 17.0.0 to 17.1.0 ([0445e20](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/0445e20978bdc3c691493ca11caa2cecf8b8713b))
+* **deps-dev:** bump globals from 17.0.0 to 17.1.0 ([68fc446](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/68fc446b92fb4f81ac610df733b6e9a9c9d52de4))
+* **deps:** bump axios from 1.13.2 to 1.13.3 ([f7d260d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/f7d260daff91689f5917dbbb691340b7440789f3))
+* **deps:** bump axios from 1.13.2 to 1.13.3 ([170628f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/170628fbd797320bd553ff5ae023078b9201c4a1))
+
 ## [0.10.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.0...v0.10.1) (2026-01-23)
 
 ### Build System
