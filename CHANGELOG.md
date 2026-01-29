@@ -2,7 +2,6 @@
 
 ## [0.11.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.11.0...v0.11.1) (2026-01-29)
 
-
 ### Build System
 
 * **deps-dev:** bump eslint-plugin-sonarjs from 3.0.5 to 3.0.6 ([325b5a0](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/325b5a005c488856d934a4d28b7de42ff64d918a))
