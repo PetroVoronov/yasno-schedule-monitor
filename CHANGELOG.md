@@ -2,7 +2,6 @@
 
 ## [0.11.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.2...v0.11.0) (2026-01-29)
 
-
 ### Features
 
 * add max-group-number option to control group processing limit ([4c7acea](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/4c7aceabe9c4f8755951a83692d6246cfab064e6))
