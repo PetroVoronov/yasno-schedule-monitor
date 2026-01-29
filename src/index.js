@@ -41,7 +41,18 @@ program
   .option('-d, --debug', 'Enable debug level logging')
   .option('--pin-message', 'Pin update messages in Telegram')
   .option('--unpin-previous', 'Unpin previous messages after pinning a new one')
-  .option('--ignore-status', 'Process schedules even if status is not ScheduleApplies');
+  .option('--ignore-status', 'Process schedules even if status is not ScheduleApplies')
+  .addOption(
+    new Option('--max-group-number <number>', 'Maximum group number to process')
+      .default(6)
+      .argParser((value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 999) {
+          throw new InvalidOptionArgumentError('Maximum group number must be a number between 1 and 999.');
+        }
+        return parsed;
+      })
+  );
 
 program.parse(process.argv);
 
@@ -55,6 +66,7 @@ const options = {
   pinMessage: Boolean(parsedOptions.pinMessage),
   unpinPrevious: Boolean(parsedOptions.unpinPrevious),
   ignoreStatus: Boolean(parsedOptions.ignoreStatus),
+  maxGroupNumber: parsedOptions.maxGroupNumber,
 };
 
 log.setTimeZone(timeZone);
@@ -124,7 +136,7 @@ const botAuthTokenMinimumLength = 43;
 
 const telegramParseMode = 'html';
 
-for (let group = 1; group <= 6; group++) {
+for (let group = 1; group <= options.maxGroupNumber; group++) {
   const oldCalendarId = cache.getItem(`calendarIdGroup${group}`);
   if (typeof oldCalendarId === 'string' && oldCalendarId.length > 0) {
     cache.setItem(`calendarIdGroup${group}.1`, oldCalendarId);
