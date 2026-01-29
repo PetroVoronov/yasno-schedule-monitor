@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.11.0...v0.11.1) (2026-01-29)
+
+
+### Build System
+
+* **deps-dev:** bump eslint-plugin-sonarjs from 3.0.5 to 3.0.6 ([325b5a0](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/325b5a005c488856d934a4d28b7de42ff64d918a))
+* **deps-dev:** bump eslint-plugin-sonarjs from 3.0.5 to 3.0.6 ([aaa7c78](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/aaa7c780ceffbe0bdfa27fce23c288e7b9dae486))
+* **deps-dev:** bump globals from 17.1.0 to 17.2.0 ([1f6c74b](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/1f6c74ba61fcb759eee0595f662f3fb9ac42d733))
+* **deps:** bump axios from 1.13.3 to 1.13.4 ([ff70842](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/ff70842f6bfa843f56f4302d9de2b02bb2681325))
+* **deps:** bump axios from 1.13.3 to 1.13.4 ([365bdda](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/365bddaf3356bed0be68ed51c7fcccabfb120089))
+* **deps:** bump teleproto from 1.221.4 to 1.221.5 ([deba8c7](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/deba8c7ed0653bb85325727326441696c3d83a85))
+
 ## [0.11.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.2...v0.11.0) (2026-01-29)
 
 ### Features
