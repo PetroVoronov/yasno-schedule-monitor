@@ -6,6 +6,7 @@ const i18n = new I18n({
   defaultLocale: 'en',
   directory: path.join('./', 'locales'),
   retryInDefaultLocale: true,
+  updateFiles: false,
 });
 
 module.exports = i18n;
