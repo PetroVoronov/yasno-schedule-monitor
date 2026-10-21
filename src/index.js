@@ -43,7 +43,8 @@ program
   .option('--unpin-previous', 'Unpin previous messages after pinning a new one')
   .option('--ignore-status', 'Process schedules even if status is not ScheduleApplies')
   .option('--admin-ids <ids>', 'Comma separated Telegram user ids allowed to manage the monitor via the bot')
-  .option('--data-dir <path>', 'Directory for configuration, state and credentials', 'data');
+  .option('--data-dir <path>', 'Directory for configuration, state and credentials', 'data')
+  .addOption(new Option('--max-group-number <number>', 'Deprecated: group ids are taken from the Yasno API').hideHelp());
 
 program.parse(process.argv);
 
@@ -58,6 +59,9 @@ const sessionDir = path.join(dataDir, 'session');
 log.setTimeZone(timeZone);
 if (parsedOptions.debug) {
   log.setLevel('debug');
+}
+if (parsedOptions.maxGroupNumber !== undefined) {
+  log.warn('Option --max-group-number is deprecated and ignored: group ids are taken from the Yasno API.');
 }
 
 const settings = new Settings({ filePath: configFilePath, logger: log });

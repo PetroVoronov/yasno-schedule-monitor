@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.11.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.11.0...v0.11.1) (2026-01-29)
+
+### Build System
+
+* **deps-dev:** bump eslint-plugin-sonarjs from 3.0.5 to 3.0.6 ([325b5a0](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/325b5a005c488856d934a4d28b7de42ff64d918a))
+* **deps-dev:** bump eslint-plugin-sonarjs from 3.0.5 to 3.0.6 ([aaa7c78](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/aaa7c780ceffbe0bdfa27fce23c288e7b9dae486))
+* **deps-dev:** bump globals from 17.1.0 to 17.2.0 ([1f6c74b](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/1f6c74ba61fcb759eee0595f662f3fb9ac42d733))
+* **deps:** bump axios from 1.13.3 to 1.13.4 ([ff70842](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/ff70842f6bfa843f56f4302d9de2b02bb2681325))
+* **deps:** bump axios from 1.13.3 to 1.13.4 ([365bdda](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/365bddaf3356bed0be68ed51c7fcccabfb120089))
+* **deps:** bump teleproto from 1.221.4 to 1.221.5 ([deba8c7](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/deba8c7ed0653bb85325727326441696c3d83a85))
+
+## [0.11.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.2...v0.11.0) (2026-01-29)
+
+### Features
+
+* add max-group-number option to control group processing limit ([4c7acea](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/4c7aceabe9c4f8755951a83692d6246cfab064e6))
+
+## [0.10.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.1...v0.10.2) (2026-01-26)
+
+### Build System
+
+* **deps-dev:** bump globals from 17.0.0 to 17.1.0 ([0445e20](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/0445e20978bdc3c691493ca11caa2cecf8b8713b))
+* **deps-dev:** bump globals from 17.0.0 to 17.1.0 ([68fc446](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/68fc446b92fb4f81ac610df733b6e9a9c9d52de4))
+* **deps:** bump axios from 1.13.2 to 1.13.3 ([f7d260d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/f7d260daff91689f5917dbbb691340b7440789f3))
+* **deps:** bump axios from 1.13.2 to 1.13.3 ([170628f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/170628fbd797320bd553ff5ae023078b9201c4a1))
+
+## [0.10.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.10.0...v0.10.1) (2026-01-23)
+
+### Build System
+
+* **deps-dev:** bump @babel/core from 7.28.5 to 7.28.6 ([82092d8](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/82092d8385061b7aceb26a2ea5de3e7bccb33c12))
+* **deps-dev:** bump @babel/core from 7.28.5 to 7.28.6 ([c304a1f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/c304a1fcd6e4294297fe1d4427d8d44a0ae03a37))
+* **deps-dev:** bump @babel/eslint-parser from 7.28.5 to 7.28.6 ([aad98e9](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/aad98e981fc6768435b774a33ea1f3c9b84ed1bf))
+* **deps-dev:** bump @babel/eslint-parser from 7.28.5 to 7.28.6 ([6b78a40](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/6b78a408cd1e3949c2699ad40326176336ced9d8))
+* **deps:** bump googleapis from 164.1.0 to 170.1.0 ([64735ef](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/64735ef92ba33bb953d0f2ac22f084b56d312ee4))
+* **deps:** bump googleapis from 164.1.0 to 170.1.0 ([20de28a](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/20de28a01277528da8f04c43d8a9e14aaabceaf0))
+* **deps:** bump grammy from 1.39.2 to 1.39.3 ([111e16c](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/111e16cd80626dbc6262f22ce216c739cab99a6a))
+* **deps:** bump grammy from 1.39.2 to 1.39.3 ([5d1cb1b](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/5d1cb1bf51b910e8721d310f2f1eee66186b5ba8))
+* **deps:** bump teleproto from 1.221.0 to 1.221.4 ([817e21e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/817e21e3198220d9e92d2223198d8dde2b197292))
+* **deps:** bump teleproto from 1.221.0 to 1.221.4 ([ad7ed3c](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/ad7ed3cea538669e060d3d3ea415e2bf91280038))
+
 ## [0.10.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.9.0...v0.10.0) (2026-01-07)
 
 ### Features
