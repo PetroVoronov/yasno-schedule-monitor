@@ -2,7 +2,6 @@
 
 ## [1.0.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v1.0.1...v1.0.2) (2026-10-25)
 
-
 ### Bug Fixes
 
 * **settings:** accept quoted environment values as passed by docker --env-file ([def646b](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/def646b68a4fc167f1d40e08d8816eed65e3179c))
