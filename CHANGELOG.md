@@ -2,7 +2,6 @@
 
 ## [1.0.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.11.1...v1.0.0) (2026-10-25)
 
-
 ### ⚠ BREAKING CHANGES
 
 * **store:** configuration and state move from data/storage (one file per key) to data/config.json. The old directory is imported once on first start and can then be deleted. Stored values now take precedence over .env; a differing env value only logs a warning. The fixed group range 1.1-6.2 and --max-group-number are gone: group ids come from the Yasno API.
@@ -18,17 +17,14 @@
 * **store:** replace node-localstorage with a single atomic JSON document ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
 * **yasno:** take the group list from the Yasno API instead of a fixed 1.1-6.2 range ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
 
-
 ### Bug Fixes
 
 * **index:** bot-mode shutdown and pinning ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
-
 
 ### Code Refactoring
 
 * **index:** resolve targets once globally ([2b5d029](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/2b5d0290c9df059b1f08b855a316a6b2670fe7a8))
 * **index:** wire runtime around Settings and make it manageable at runtime ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
-
 
 ### Build System
 
@@ -47,12 +43,10 @@
 * **deps:** update dependencies and clear audit findings before 1.0.0 ([771ff19](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/771ff194ae5e1107d29d3b4079635885b32eaa97))
 * **deps:** update dependencies and clear production audit findings before 1.0.0 ([a7682ec](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/a7682ec8adf068f8c90e1d365f4183f83d8d1532))
 
-
 ### Miscellaneous Chores
 
 * **i18n:** stop i18n from rewriting locale files at runtime ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
 * **lint:** exclude data/ from eslint ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
-
 
 ### Documentation
 
@@ -60,7 +54,6 @@
 * describe Telegram targets ([75f626d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/75f626d959c15e388c3f2ec25b48db97e00b0b88))
 * document configuration, management bot and storage layout ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
 * **readme:** minimum Node.js is 22.12 since commander 15 ([a7682ec](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/a7682ec8adf068f8c90e1d365f4183f83d8d1532))
-
 
 ### Tests
 
