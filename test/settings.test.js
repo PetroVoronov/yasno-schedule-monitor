@@ -61,7 +61,7 @@ describe('Settings groups', () => {
   test('setGroupField validates and coerces, configuredGroupIds needs a calendar', () => {
     const settings = makeSettings();
     expect(settings.configuredGroupIds()).toEqual([]);
-    settings.addTarget('2_1', {chatId: '-1001'});
+    settings.addTargetToGroup('2_1', {chatId: '-1001'});
     expect(settings.configuredGroupIds()).toEqual([]);
     expect(settings.knownGroupIds()).toEqual(['2.1']);
     settings.setGroupField('2.1', 'calendarId', ' cal@group ');
@@ -69,11 +69,8 @@ describe('Settings groups', () => {
     settings.setGroupField('2.1', 'svitlobotChannelIds', 'a,b');
     settings.setGroupField('10.1', 'calendarId', 'cal10');
     expect(settings.configuredGroupIds()).toEqual(['1.2', '2.1', '10.1']);
-    expect(settings.getGroup('2.1')).toEqual({
-      calendarId: 'cal@group',
-      telegramTargets: [{type: 'group', chatId: -1001, topicId: null, label: null, enabled: true}],
-      svitlobotChannelIds: ['a', 'b'],
-    });
+    expect(settings.getGroup('2.1')).toEqual({calendarId: 'cal@group', targetKeys: ['-1001:0'], svitlobotChannelIds: ['a', 'b']});
+    expect(settings.listTargets('2.1')).toEqual([{type: 'group', chatId: -1001, topicId: null, label: null, enabled: true, key: '-1001:0'}]);
     expect(() => settings.setGroupField('x.y', 'calendarId', 'x')).toThrow(/Invalid group id/);
     expect(() => settings.setGroupField('2.1', 'nope', 'x')).toThrow(/Unknown group field/);
   });
@@ -88,27 +85,49 @@ describe('Settings groups', () => {
     expect(settings.knownGroupIds()).toEqual([]);
   });
 
-  test('targets can be added, updated and removed; duplicates are rejected', () => {
+  test('targets are global: add, assign to several groups, update, unassign, remove', () => {
     const settings = makeSettings();
-    const first = settings.addTarget('1.1', {chatId: -100, topicId: 2, label: 'Main'});
-    settings.addTarget('1.1', {type: 'channel', chatId: -200});
-    expect(() => settings.addTarget('1.1', {chatId: '-100', topicId: '2'})).toThrow(/already exists/);
-    expect(settings.listTargets('1.1').map(targetKey)).toEqual(['-100:2', '-200:0']);
-    settings.setLastMessageId('1.1', targetKey(first), 77);
-    expect(settings.getLastMessageId('1.1', '-100:2')).toBe(77);
+    const first = settings.addTarget({chatId: -100, topicId: 2, label: 'Main'});
+    expect(first.key).toBe('-100:2');
+    settings.addTarget({type: 'channel', chatId: -200});
+    expect(() => settings.addTarget({chatId: '-100', topicId: '2'})).toThrow(/already exists/);
+    expect(settings.listAllTargets().map((target) => target.key)).toEqual(['-200:0', '-100:2']);
 
-    const updated = settings.updateTarget('1.1', '-100:2', {enabled: false, label: 'Paused', chatId: -999});
-    expect(updated).toEqual({type: 'topic', chatId: -100, topicId: 2, label: 'Paused', enabled: false});
-    expect(() => settings.updateTarget('1.1', '-1:0', {enabled: true})).toThrow(/not found/);
+    settings.assignTarget('1.1', '-100:2');
+    settings.assignTarget('1.1', '-100:2'); // idempotent
+    settings.assignTarget('2.1', '-100:2');
+    settings.assignTarget('2.1', '-200:0');
+    expect(() => settings.assignTarget('3.1', '-1:0')).toThrow(/not found/);
+    expect(settings.groupsUsingTarget('-100:2')).toEqual(['1.1', '2.1']);
+    expect(settings.listTargets('2.1').map((target) => target.key)).toEqual(['-100:2', '-200:0']);
+    expect(settings.getGroup('1.1').targetKeys).toEqual(['-100:2']);
 
-    settings.removeTarget('1.1', '-100:2');
-    expect(settings.listTargets('1.1').map(targetKey)).toEqual(['-200:0']);
+    // addTargetToGroup reuses an existing target and fills a missing label
+    const reused = settings.addTargetToGroup('3.1', {chatId: -200, label: 'News'});
+    expect(reused).toMatchObject({key: '-200:0', label: 'News'});
+    expect(settings.listAllTargets()).toHaveLength(2);
+    expect(settings.groupsUsingTarget('-200:0')).toEqual(['2.1', '3.1']);
+
+    settings.setLastMessageId('1.1', '-100:2', 77);
+    settings.setLastMessageId('2.1', '-100:2', 78);
+    const updated = settings.updateTarget('-100:2', {enabled: false, label: 'Paused', chatId: -999});
+    expect(updated).toEqual({type: 'topic', chatId: -100, topicId: 2, label: 'Paused', enabled: false, key: '-100:2'});
+    expect(() => settings.updateTarget('-1:0', {enabled: true})).toThrow(/not found/);
+
+    settings.unassignTarget('1.1', '-100:2');
     expect(settings.getLastMessageId('1.1', '-100:2')).toBeNull();
-    settings.removeTarget('1.1', '-200:0');
-    expect(settings.knownGroupIds()).toEqual([]);
+    expect(settings.getLastMessageId('2.1', '-100:2')).toBe(78);
+    expect(settings.knownGroupIds()).toEqual(['2.1', '3.1']); // 1.1 had nothing else
+    expect(() => settings.unassignTarget('1.1', '-100:2')).toThrow(/not assigned/);
+
+    expect(settings.removeTarget('-100:2')).toEqual(['2.1']);
+    expect(settings.getTarget('-100:2')).toBeNull();
+    expect(settings.getLastMessageId('2.1', '-100:2')).toBeNull();
+    expect(settings.listTargets('2.1').map((target) => target.key)).toEqual(['-200:0']);
+    expect(() => settings.removeTarget('-100:2')).toThrow(/not found/);
   });
 
-  test('a v1 document is migrated to targets on init', () => {
+  test('a v1 document is migrated through v2 to global targets on init', () => {
     const dir = tmpDir();
     const filePath = path.join(dir, 'config.json');
     fs.writeFileSync(
@@ -124,16 +143,37 @@ describe('Settings groups', () => {
     );
     const settings = new Settings({filePath});
     settings.init();
-    expect(settings.store.get('version')).toBe(2);
-    expect(settings.getGroup('1.1')).toEqual({
-      calendarId: 'cal',
-      telegramTargets: [{type: 'topic', chatId: -100, topicId: 2, label: null, enabled: true}],
-      svitlobotChannelIds: [],
-    });
-    expect(settings.getGroup('2.1').telegramTargets).toEqual([]);
+    expect(settings.store.get('version')).toBe(3);
+    expect(settings.getGroup('1.1')).toEqual({calendarId: 'cal', targetKeys: ['-100:2'], svitlobotChannelIds: []});
+    expect(settings.listAllTargets()).toEqual([{type: 'topic', chatId: -100, topicId: 2, label: null, enabled: true, key: '-100:2'}]);
+    expect(settings.getGroup('2.1').targetKeys).toEqual([]);
     expect(settings.getLastMessageId('1.1', '-100:2')).toBe(614);
     expect(settings.store.get(['groups', '1.1', 'telegramChatId'], 'gone')).toBe('gone');
+    expect(settings.store.get(['groups', '1.1', 'telegramTargets'], 'gone')).toBe('gone');
     expect(settings.store.get(['state', 'lastMessageIds', '1.1'], 'gone')).toBe('gone');
+  });
+
+  test('a v2 document shares identical targets between groups when upgraded', () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'config.json');
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 2,
+        groups: {
+          '1.1': {calendarId: 'cal', telegramTargets: [{type: 'topic', chatId: -100, topicId: 2, label: 'Main', enabled: false}], svitlobotChannelIds: []},
+          '2.1': {calendarId: 'cal2', telegramTargets: [{type: 'topic', chatId: -100, topicId: 2, label: null, enabled: true}, {type: 'channel', chatId: -300, topicId: null, label: null, enabled: true}], svitlobotChannelIds: []},
+        },
+        state: {lastMessageIds: {'1.1|-100:2': 1, '2.1|-100:2': 2}, knownYasnoStatuses: {}},
+      }),
+    );
+    const settings = new Settings({filePath});
+    settings.init();
+    expect(settings.store.get('version')).toBe(3);
+    expect(settings.listAllTargets().map((target) => target.key)).toEqual(['-300:0', '-100:2']);
+    expect(settings.getTarget('-100:2')).toMatchObject({label: 'Main', enabled: true});
+    expect(settings.groupsUsingTarget('-100:2')).toEqual(['1.1', '2.1']);
+    expect(settings.getLastMessageId('2.1', '-100:2')).toBe(2);
   });
 });
 
@@ -198,14 +238,11 @@ describe('Settings env seeding', () => {
     expect(applied.sort()).toEqual(
       ['TELEGRAM_BOT_AUTH_TOKEN', 'TELEGRAM_ADMIN_IDS', 'CALENDAR_ID_GROUP_1_1', 'TELEGRAM_CHAT_ID_GROUP_1_1', 'SVITLOBOT_CHANNEL_ID_GROUP_1__1', 'CALENDAR_ID_GROUP_2'].sort(),
     );
-    expect(settings.getGroup('1.1')).toEqual({
-      calendarId: 'cal11',
-      telegramTargets: [
-        {type: 'topic', chatId: -100, topicId: 7, label: null, enabled: true},
-        {type: 'topic', chatId: -200, topicId: 5, label: null, enabled: true},
-      ],
-      svitlobotChannelIds: ['KEY1'],
-    });
+    expect(settings.getGroup('1.1')).toEqual({calendarId: 'cal11', targetKeys: ['-100:7', '-200:5'], svitlobotChannelIds: ['KEY1']});
+    expect(settings.listTargets('1.1')).toEqual([
+      {type: 'topic', chatId: -100, topicId: 7, label: null, enabled: true, key: '-100:7'},
+      {type: 'topic', chatId: -200, topicId: 5, label: null, enabled: true, key: '-200:5'},
+    ]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('TELEGRAM_CHAT_ID_GROUP_2_1'));
     expect(settings.getGroup('2.1').calendarId).toBe('cal21');
     expect(settings.getAdminIds()).toEqual([10, 20]);
@@ -247,14 +284,11 @@ describe('Settings legacy import', () => {
     const result = settings.init({legacyDir});
     expect(result.loaded).toBe(false);
     expect(result.imported).toBe(9);
-    expect(settings.getGroup('1.1')).toEqual({
-      calendarId: 'cal11',
-      telegramTargets: [{type: 'topic', chatId: -100500, topicId: 2, label: null, enabled: true}],
-      svitlobotChannelIds: ['K1', 'K2'],
-    });
+    expect(settings.getGroup('1.1')).toEqual({calendarId: 'cal11', targetKeys: ['-100500:2'], svitlobotChannelIds: ['K1', 'K2']});
+    expect(settings.getTarget('-100500:2')).toMatchObject({type: 'topic', chatId: -100500, topicId: 2});
     expect(settings.getGroup('2.1').calendarId).toBe('cal21');
     expect(settings.getLastMessageId('1.1', '-100500:2')).toBe(578);
-    expect(settings.store.get('version')).toBe(2);
+    expect(settings.store.get('version')).toBe(3);
     expect(settings.getBotToken()).toBe(token);
     expect(Object.keys(settings.getKnownYasnoStatuses())).toEqual(['ScheduleApplies']);
     expect(fs.readdirSync(legacyDir)).toHaveLength(Object.keys(files).length);

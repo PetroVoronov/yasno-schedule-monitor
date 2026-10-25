@@ -65,7 +65,7 @@ function resolveField(value) {
  */
 function createManagementBot({bot, controller, i18n, logger, timeZone = 'Europe/Kiev'}) {
   const texts = createTexts({controller, i18n, timeZone});
-  const {__, yesNo, helpText, formatGroup, formatTarget, statusText, scheduleText, whoamiText, adminsText, statusesText} = texts;
+  const {__, yesNo, helpText, formatGroup, formatTarget, targetsText, statusText, scheduleText, whoamiText, adminsText, statusesText} = texts;
 
   const isAdmin = (userId) => controller.getAdminIds().includes(userId);
 
@@ -161,36 +161,74 @@ function createManagementBot({bot, controller, i18n, logger, timeZone = 'Europe/
     await reply(ctx, groups.map(formatGroup).join('\n\n'));
   });
 
-  async function handleTargetCommand(ctx, groupId, args) {
-    const usage = __('Usage: /group <id> target add <chatId>[/<topicId>] [label] | target remove|enable|disable <chatId>[/<topicId>]');
+  async function handleGroupTargetCommand(ctx, groupId, args) {
+    const usage = __('Usage: /group <id> target assign|unassign <chatId>[/<topicId>] | target add <chatId>[/<topicId>] [label]');
     const [action, rawRef, ...rest] = args;
     const ref = parseTargetRef(rawRef);
-    if (!['add', 'remove', 'enable', 'disable'].includes(String(action).toLowerCase()) || ref === null) {
+    const verb = String(action ?? '').toLowerCase();
+    if (!['assign', 'unassign', 'add', 'remove'].includes(verb) || ref === null) {
       await reply(ctx, escapeHtml(usage));
       return;
     }
     const key = targetKey(ref);
     try {
-      switch (action.toLowerCase()) {
+      if (verb === 'add') {
+        const target = await controller.addTarget({...ref, label: rest.join(' ')}, groupId);
+        await reply(ctx, `✅ ${escapeHtml(__('Target assigned to group {group}.', {group: groupId}))}\n${formatTarget(target)}`);
+      } else if (verb === 'assign') {
+        const group = await controller.assignTarget(groupId, key);
+        await reply(ctx, `✅ ${escapeHtml(__('Target assigned to group {group}.', {group: groupId}))}\n\n${formatGroup(group)}`);
+      } else {
+        const group = await controller.unassignTarget(groupId, key);
+        await reply(ctx, `✅ ${escapeHtml(__('Target unassigned from group {group}.', {group: groupId}))}\n\n${formatGroup(group)}`);
+      }
+    } catch (error) {
+      await reply(ctx, `⚠️ ${escapeHtml(error.message)}`);
+    }
+  }
+
+  priv.command('targets', async (ctx) => {
+    await reply(ctx, targetsText(controller.getTargets()));
+  });
+
+  priv.command('target', async (ctx) => {
+    const [action, rawRef, ...rest] = splitArgs(ctx.match);
+    const usage = __('Usage: /target add <chatId>[/<topicId>] [label] | /target remove|enable|disable <chatId>[/<topicId>] | /target label <chatId>[/<topicId>] <text>');
+    const ref = parseTargetRef(rawRef);
+    const verb = String(action ?? '').toLowerCase();
+    if (!['add', 'remove', 'enable', 'disable', 'label'].includes(verb) || ref === null) {
+      await reply(ctx, escapeHtml(usage));
+      return;
+    }
+    const key = targetKey(ref);
+    try {
+      switch (verb) {
         case 'add': {
-          const target = await controller.addTarget(groupId, {...ref, label: rest.join(' ')});
+          const target = await controller.addTarget({...ref, label: rest.join(' ')});
           await reply(ctx, `✅ ${escapeHtml(__('Target added.'))}\n${formatTarget(target)}`);
           break;
         }
         case 'remove': {
-          const group = await controller.removeTarget(groupId, key);
-          await reply(ctx, `✅ ${escapeHtml(__('Target removed.'))}\n\n${formatGroup(group)}`);
+          const affected = await controller.removeTarget(key);
+          const suffix = affected.length > 0 ? ` ${escapeHtml(__('Unassigned from groups: {groups}', {groups: affected.join(', ')}))}` : '';
+          await reply(ctx, `✅ ${escapeHtml(__('Target removed.'))}${suffix}`);
+          break;
+        }
+        case 'label': {
+          const label = rest.join(' ').trim();
+          const target = await controller.updateTarget(key, {label: label === '-' ? null : label});
+          await reply(ctx, `✅ ${formatTarget(target)}`);
           break;
         }
         default: {
-          const target = await controller.updateTarget(groupId, key, {enabled: action.toLowerCase() === 'enable'});
+          const target = await controller.updateTarget(key, {enabled: verb === 'enable'});
           await reply(ctx, `✅ ${formatTarget(target)}`);
         }
       }
     } catch (error) {
       await reply(ctx, `⚠️ ${escapeHtml(error.message)}`);
     }
-  }
+  });
 
   priv.command('group', async (ctx) => {
     const [rawGroup, action, rawField, ...rest] = splitArgs(ctx.match);
@@ -215,7 +253,7 @@ function createManagementBot({bot, controller, i18n, logger, timeZone = 'Europe/
         await reply(ctx, formatGroup(group));
         return;
       }
-      await handleTargetCommand(ctx, groupId, [rawField, ...rest]);
+      await handleGroupTargetCommand(ctx, groupId, [rawField, ...rest]);
       return;
     }
     const field = resolveField(rawField);

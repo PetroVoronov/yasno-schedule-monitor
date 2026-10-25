@@ -89,9 +89,13 @@ Set `TELEGRAM_ADMIN_IDS` (or `--admin-ids`) to your Telegram user id and start a
 | `/group <id>` | Show one group. |
 | `/group <id> set <field> <value>` | Set `calendar` or `svitlobot` (comma separated keys). The id must be one Yasno returns. |
 | `/group <id> unset <field>` | Remove a field. A group without calendar becomes inactive. |
-| `/group <id> targets` | List the Telegram targets of a group. |
-| `/group <id> target add <chatId>[/<topicId>] [label]` | Add a Telegram target. The type (user, bot, group, channel, topic) is inferred from the ids. |
-| `/group <id> target remove\|enable\|disable <chatId>[/<topicId>]` | Remove or pause a target. |
+| `/group <id> targets` | List the Telegram targets assigned to a group. |
+| `/group <id> target assign\|unassign <chatId>[/<topicId>]` | Assign an existing target to the group, or remove it from the group. |
+| `/group <id> target add <chatId>[/<topicId>] [label]` | Create the target if needed and assign it in one step. |
+| `/targets` | List all Telegram targets and the groups using them. |
+| `/target add <chatId>[/<topicId>] [label]` | Create a target. The type (user, bot, group, channel, topic) is inferred from the ids. |
+| `/target remove\|enable\|disable <chatId>[/<topicId>]` | Delete a target (it is unassigned from every group) or pause it everywhere. |
+| `/target label <chatId>[/<topicId>] <text>` | Rename a target (`-` clears the label). |
 | `/interval <minutes>` | Change the check interval (1–120). |
 | `/pin on\|off`, `/unpinprev on\|off`, `/ignorestatus on\|off`, `/debug on\|off` | Toggle options. Without an argument the current value is shown. |
 | `/statuses` | Yasno day statuses seen so far. |
@@ -104,9 +108,9 @@ To discover a chat id and topic id, add the bot to the target group, open the to
 
 ### Telegram targets
 
-Each group can post to any number of Telegram targets, modelled as in [telegram-forward-user-bot](https://github.com/PetroVoronov/telegram-forward-user-bot): a target has a type (`user`, `bot`, `group`, `channel` or `topic`), a chat id, an optional topic id, an optional label and an enabled flag. Pinning and unpinning are tracked per target.
+Telegram targets are configured once and then assigned to any number of groups, so a chat that should receive several groups' schedules is set up a single time. A target is modelled as in [telegram-forward-user-bot](https://github.com/PetroVoronov/telegram-forward-user-bot): a type (`user`, `bot`, `group`, `channel` or `topic`), a chat id, an optional topic id, an optional label and an enabled flag. Disabling a target pauses it for every group. Pinning and unpinning are tracked per group and target.
 
-In the menu open Groups, pick a group and tap "Add target". You choose the type first. In user mode (`--as-user`) the bot then lists your chats of that type (and the topics of a forum), so you just tap the one you want. In bot mode the Bot API cannot list chats, so you type the id instead; `/whoami` inside the target chat tells you the chat id and topic id. A bot can only message users who have started a chat with it, and it must be a member (or admin, for channels) of the chats it posts to.
+In the menu, "Telegram targets" on the main screen lists all targets and lets you add, rename, pause or delete them. Inside a group, "Assign target" offers the existing targets that are not yet assigned, plus "New target". Creating a target starts the same wizard either way: you choose the type first. In user mode (`--as-user`) the bot then lists your chats of that type (and the topics of a forum), so you just tap the one you want. In bot mode the Bot API cannot list chats, so you type the id instead; `/whoami` inside the target chat tells you the chat id and topic id. A bot can only message users who have started a chat with it, and it must be a member (or admin, for channels) of the chats it posts to.
 
 ## Storage layout
 
@@ -114,18 +118,16 @@ In the menu open Groups, pick a group and tap "Add target". You choose the type 
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "telegram": { "botToken": "…", "managementBotToken": null, "apiId": null, "apiHash": null, "adminIds": [123456789] },
   "options": { "pinMessage": true },
+  "targets": {
+    "-1001234567890:2": { "type": "topic", "chatId": -1001234567890, "topicId": 2, "label": "Main", "enabled": true },
+    "-1009876543210:0": { "type": "channel", "chatId": -1009876543210, "topicId": null, "label": null, "enabled": true }
+  },
   "groups": {
-    "1.1": {
-      "calendarId": "…@group.calendar.google.com",
-      "telegramTargets": [
-        { "type": "topic", "chatId": -1001234567890, "topicId": 2, "label": "Main", "enabled": true },
-        { "type": "channel", "chatId": -1009876543210, "topicId": null, "label": null, "enabled": true }
-      ],
-      "svitlobotChannelIds": ["KEY"]
-    }
+    "1.1": { "calendarId": "…@group.calendar.google.com", "targetKeys": ["-1001234567890:2", "-1009876543210:0"], "svitlobotChannelIds": ["KEY"] },
+    "2.1": { "calendarId": "…@group.calendar.google.com", "targetKeys": ["-1009876543210:0"], "svitlobotChannelIds": [] }
   },
   "state": { "lastMessageIds": { "1.1|-1001234567890:2": 578 }, "knownYasnoStatuses": { "ScheduleApplies": { } }, "yasnoGroupIds": ["1.1", "2.1"] },
   "meta": { "legacyImported": true }
@@ -136,7 +138,7 @@ Other files in `data/`: `yasno-monitor.json` (Google key) and `session/` (only w
 
 ### Upgrading from 0.10 and earlier
 
-Earlier versions kept one file per key in `data/storage`. On the first start the new version imports those values into `data/config.json` once (`meta.legacyImported`) and leaves the directory untouched. After checking `/status` or the config file you can delete `data/storage`. A `config.json` written by an earlier 1.x pre-release (version 1, single `telegramChatId`/`telegramTopicId` per group) is upgraded to version 2 with a `telegramTargets` list automatically.
+Earlier versions kept one file per key in `data/storage`. On the first start the new version imports those values into `data/config.json` once (`meta.legacyImported`) and leaves the directory untouched. After checking `/status` or the config file you can delete `data/storage`. A `config.json` written by an earlier 1.x pre-release (version 1 with a single `telegramChatId`/`telegramTopicId` per group, or version 2 with a `telegramTargets` list per group) is upgraded to version 3 automatically; identical targets of different groups become one shared target.
 
 ## Development
 

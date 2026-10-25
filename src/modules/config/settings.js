@@ -13,7 +13,7 @@ const GROUP_ID_PATTERN = /^\d{1,3}\.\d{1,2}$/;
 const GROUP_FIELDS = ['calendarId', 'svitlobotChannelIds'];
 /** Telegram target kinds, as in telegram-forward-user-bot. */
 const TARGET_TYPES = ['user', 'bot', 'group', 'channel', 'topic'];
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 const PERSISTED_OPTIONS = ['scheduleUpdateInterval', 'pinMessage', 'unpinPrevious', 'ignoreStatus', 'debug'];
 const BOT_TOKEN_MIN_LENGTH = 43;
 
@@ -27,6 +27,7 @@ const DEFAULT_DOCUMENT = {
     adminIds: [],
   },
   options: {},
+  targets: {},
   groups: {},
   state: {
     lastMessageIds: {},
@@ -94,7 +95,7 @@ function parseInteger(value) {
 }
 
 function emptyGroup() {
-  return {calendarId: null, telegramTargets: [], svitlobotChannelIds: []};
+  return {calendarId: null, targetKeys: [], svitlobotChannelIds: []};
 }
 
 /** Guess the target type from the ids when it was not given (legacy data, env). */
@@ -196,7 +197,9 @@ class Settings {
   /**
    * Upgrade older document layouts in place.
    * v1 -> v2: group.telegramChatId/telegramTopicId become group.telegramTargets[], and
-   * state.lastMessageIds is keyed by "<group>|<chatId>:<topicId>" instead of "<group>".
+   *           state.lastMessageIds is keyed by "<group>|<chatId>:<topicId>" instead of "<group>".
+   * v2 -> v3: targets move to the top-level `targets` map (one entry per chat/topic) and groups
+   *           reference them through `targetKeys`, so one target can serve several groups.
    */
   migrate() {
     const version = this.store.get('version', 1);
@@ -207,35 +210,73 @@ class Settings {
       data.groups = data.groups || {};
       data.state = data.state || {};
       data.state.lastMessageIds = data.state.lastMessageIds || {};
-      for (const [groupId, group] of Object.entries(data.groups)) {
-        if (!group || typeof group !== 'object') {
-          continue;
-        }
-        const chatId = parseInteger(group.telegramChatId);
-        const topicId = parseInteger(group.telegramTopicId);
-        group.telegramTargets = Array.isArray(group.telegramTargets) ? group.telegramTargets : [];
-        if (chatId !== null && chatId !== 0) {
-          try {
-            const target = normalizeTarget({chatId, topicId});
-            if (!group.telegramTargets.some((item) => targetKey(item) === targetKey(target))) {
-              group.telegramTargets.push(target);
-            }
-            const lastMessageId = parseInteger(data.state.lastMessageIds[groupId]);
-            if (lastMessageId !== null) {
-              data.state.lastMessageIds[`${groupId}|${targetKey(target)}`] = lastMessageId;
-            }
-          } catch (error) {
-            this.#logger?.warn?.(`Group ${groupId}: telegram target not migrated: ${error.message}`);
-          }
-        }
-        delete data.state.lastMessageIds[groupId];
-        delete group.telegramChatId;
-        delete group.telegramTopicId;
+      let current = Number.isInteger(data.version) ? data.version : 1;
+      if (current < 2) {
+        this.#migrateV1toV2(data);
+        current = 2;
+      }
+      if (current < 3) {
+        this.#migrateV2toV3(data);
       }
       data.version = CONFIG_VERSION;
     });
     this.#logger?.info?.(`Configuration upgraded to version ${CONFIG_VERSION}.`);
     return true;
+  }
+
+  #migrateV1toV2(data) {
+    for (const [groupId, group] of Object.entries(data.groups)) {
+      if (!group || typeof group !== 'object') {
+        continue;
+      }
+      const chatId = parseInteger(group.telegramChatId);
+      const topicId = parseInteger(group.telegramTopicId);
+      group.telegramTargets = Array.isArray(group.telegramTargets) ? group.telegramTargets : [];
+      if (chatId !== null && chatId !== 0) {
+        try {
+          const target = normalizeTarget({chatId, topicId});
+          if (!group.telegramTargets.some((item) => targetKey(item) === targetKey(target))) {
+            group.telegramTargets.push(target);
+          }
+          const lastMessageId = parseInteger(data.state.lastMessageIds[groupId]);
+          if (lastMessageId !== null) {
+            data.state.lastMessageIds[`${groupId}|${targetKey(target)}`] = lastMessageId;
+          }
+        } catch (error) {
+          this.#logger?.warn?.(`Group ${groupId}: telegram target not migrated: ${error.message}`);
+        }
+      }
+      delete data.state.lastMessageIds[groupId];
+      delete group.telegramChatId;
+      delete group.telegramTopicId;
+    }
+  }
+
+  #migrateV2toV3(data) {
+    data.targets = data.targets && typeof data.targets === 'object' ? data.targets : {};
+    for (const [groupId, group] of Object.entries(data.groups)) {
+      if (!group || typeof group !== 'object') {
+        continue;
+      }
+      group.targetKeys = Array.isArray(group.targetKeys) ? group.targetKeys : [];
+      for (const item of Array.isArray(group.telegramTargets) ? group.telegramTargets : []) {
+        try {
+          const target = normalizeTarget(item);
+          const key = targetKey(target);
+          if (!data.targets[key]) {
+            data.targets[key] = target;
+          } else if (target.enabled && !data.targets[key].enabled) {
+            data.targets[key].enabled = true;
+          }
+          if (!group.targetKeys.includes(key)) {
+            group.targetKeys.push(key);
+          }
+        } catch (error) {
+          this.#logger?.warn?.(`Group ${groupId}: telegram target not migrated: ${error.message}`);
+        }
+      }
+      delete group.telegramTargets;
+    }
   }
 
   // ---------- groups ----------
@@ -294,12 +335,12 @@ class Settings {
       return null;
     }
     const group = {...emptyGroup(), ...this.store.get(['groups', id], {})};
-    group.telegramTargets = Array.isArray(group.telegramTargets) ? group.telegramTargets : [];
+    group.targetKeys = Array.isArray(group.targetKeys) ? group.targetKeys : [];
     return group;
   }
 
   #saveGroup(id, group) {
-    const isEmpty = group.calendarId === null && group.telegramTargets.length === 0 && group.svitlobotChannelIds.length === 0;
+    const isEmpty = group.calendarId === null && group.targetKeys.length === 0 && group.svitlobotChannelIds.length === 0;
     if (isEmpty) {
       this.store.unset(['groups', id]);
     } else {
@@ -308,65 +349,126 @@ class Settings {
     return group;
   }
 
-  // ---------- telegram targets ----------
+  // ---------- telegram targets (global, shared between groups) ----------
 
-  listTargets(groupId) {
-    return this.getGroup(groupId)?.telegramTargets ?? [];
+  /** All configured targets with their key, sorted by label/type/chat id. */
+  listAllTargets() {
+    const targets = this.store.get('targets', {});
+    return Object.keys(targets)
+      .map((key) => ({...normalizeTarget(targets[key]), key}))
+      .sort((a, b) => (a.label || '').localeCompare(b.label || '') || a.type.localeCompare(b.type) || a.chatId - b.chatId || (a.topicId ?? 0) - (b.topicId ?? 0));
   }
 
-  findTarget(groupId, key) {
-    return this.listTargets(groupId).find((target) => targetKey(target) === key) ?? null;
+  getTarget(key) {
+    const target = this.store.get(['targets', key], null);
+    return target ? {...normalizeTarget(target), key} : null;
+  }
+
+  /** Targets assigned to a group, in assignment order (dangling keys are skipped). */
+  listTargets(groupId) {
+    const group = this.getGroup(groupId);
+    if (!group) {
+      return [];
+    }
+    return group.targetKeys.map((key) => this.getTarget(key)).filter((target) => target !== null);
+  }
+
+  groupsUsingTarget(key) {
+    const groups = this.store.get('groups', {});
+    return Object.keys(groups)
+      .filter((id) => Array.isArray(groups[id]?.targetKeys) && groups[id].targetKeys.includes(key))
+      .sort(compareGroupIds);
   }
 
   /**
-   * Add a Telegram target to a group.
-   * @returns {object} The normalised target.
+   * Create a target. Fails when a target for the same chat/topic exists.
+   * @returns {object} The normalised target with its key.
    */
-  addTarget(groupId, input) {
-    const id = this.assertYasnoGroupId(groupId);
+  addTarget(input) {
     const target = normalizeTarget(input);
-    const group = this.getGroup(id);
-    if (group.telegramTargets.some((item) => targetKey(item) === targetKey(target))) {
-      throw new Error(`Target ${targetKey(target)} already exists in group ${id}`);
+    const key = targetKey(target);
+    if (this.store.has(['targets', key])) {
+      throw new Error(`Target ${key} already exists`);
     }
-    group.telegramTargets.push(target);
-    this.#saveGroup(id, group);
+    this.store.set(['targets', key], target);
+    return {...target, key};
+  }
+
+  /** Change label/enabled/type of a target (ids are immutable; remove and add instead). */
+  updateTarget(key, patch) {
+    const current = this.getTarget(key);
+    if (!current) {
+      throw new Error(`Target ${key} not found`);
+    }
+    const next = normalizeTarget({...current, ...patch, chatId: current.chatId, topicId: current.topicId});
+    this.store.set(['targets', key], next);
+    return {...next, key};
+  }
+
+  /**
+   * Delete a target, unassign it from every group and forget its last message ids.
+   * @returns {string[]} Ids of the groups it was removed from.
+   */
+  removeTarget(key) {
+    if (!this.store.has(['targets', key])) {
+      throw new Error(`Target ${key} not found`);
+    }
+    const affected = this.groupsUsingTarget(key);
+    this.store.update((data) => {
+      delete data.targets[key];
+      for (const groupId of affected) {
+        data.groups[groupId].targetKeys = data.groups[groupId].targetKeys.filter((item) => item !== key);
+        delete data.state.lastMessageIds[`${groupId}|${key}`];
+      }
+    });
+    for (const groupId of affected) {
+      this.#saveGroup(groupId, this.getGroup(groupId));
+    }
+    return affected;
+  }
+
+  /** Assign an existing target to a group (idempotent). */
+  assignTarget(groupId, key) {
+    const id = this.assertYasnoGroupId(groupId);
+    const target = this.getTarget(key);
+    if (!target) {
+      throw new Error(`Target ${key} not found`);
+    }
+    const group = this.getGroup(id);
+    if (!group.targetKeys.includes(key)) {
+      group.targetKeys.push(key);
+      this.#saveGroup(id, group);
+    }
     return target;
   }
 
-  /**
-   * Change label/enabled/type of an existing target (ids are immutable; remove and add instead).
-   */
-  updateTarget(groupId, key, patch) {
+  unassignTarget(groupId, key) {
     const id = normalizeGroupId(groupId);
     if (id === null) {
       throw new Error(`Invalid group id: ${groupId}`);
     }
     const group = this.getGroup(id);
-    const index = group.telegramTargets.findIndex((item) => targetKey(item) === key);
-    if (index === -1) {
-      throw new Error(`Target ${key} not found in group ${id}`);
+    if (!group.targetKeys.includes(key)) {
+      throw new Error(`Target ${key} is not assigned to group ${id}`);
     }
-    const current = group.telegramTargets[index];
-    const next = normalizeTarget({...current, ...patch, chatId: current.chatId, topicId: current.topicId});
-    group.telegramTargets[index] = next;
-    this.#saveGroup(id, group);
-    return next;
-  }
-
-  removeTarget(groupId, key) {
-    const id = normalizeGroupId(groupId);
-    if (id === null) {
-      throw new Error(`Invalid group id: ${groupId}`);
-    }
-    const group = this.getGroup(id);
-    const before = group.telegramTargets.length;
-    group.telegramTargets = group.telegramTargets.filter((item) => targetKey(item) !== key);
-    if (group.telegramTargets.length === before) {
-      throw new Error(`Target ${key} not found in group ${id}`);
-    }
+    group.targetKeys = group.targetKeys.filter((item) => item !== key);
     this.store.unset(['state', 'lastMessageIds', `${id}|${key}`]);
     return this.#saveGroup(id, group);
+  }
+
+  /** Create the target when it does not exist yet, then assign it to the group. */
+  addTargetToGroup(groupId, input) {
+    const id = this.assertYasnoGroupId(groupId);
+    const wanted = normalizeTarget(input);
+    const key = targetKey(wanted);
+    let target = this.getTarget(key);
+    if (!target) {
+      target = this.addTarget(wanted);
+    } else if (wanted.label && !target.label) {
+      target = this.updateTarget(key, {label: wanted.label});
+    }
+    this.assignTarget(id, key);
+    return target;
   }
 
   /**
@@ -591,14 +693,14 @@ class Settings {
       const wanted = refs.map((ref) => normalizeTarget(ref));
       seed(
         name,
-        () => this.listTargets(groupId).length === 0,
+        () => this.getGroup(groupId).targetKeys.length === 0,
         () => {
           for (const target of wanted) {
-            this.addTarget(groupId, target);
+            this.addTargetToGroup(groupId, target);
           }
         },
         () => {
-          const current = this.listTargets(groupId).map(targetKey);
+          const current = this.getGroup(groupId).targetKeys;
           return wanted.every((target) => current.includes(targetKey(target)));
         },
       );

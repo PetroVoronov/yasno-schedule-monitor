@@ -23,12 +23,19 @@ const OPTION_LABELS = {
  * @returns {{showHome: (ctx) => Promise<void>, handleText: (ctx) => Promise<boolean>, cancel: (ctx) => Promise<boolean>}}
  */
 function registerMenu({composer, controller, texts, logger}) {
-  const {__, yesNo, formatGroup, formatTarget, targetName, statusText, scheduleText, helpText, adminsText} = texts;
+  const {__, yesNo, formatGroup, formatTarget, targetName, targetsText, statusText, scheduleText, helpText, adminsText} = texts;
   /** @type {Map<number, {kind: string, expires: number, [key: string]: any}>} */
   const pending = new Map();
 
   const back = (keyboard, target = 'm:home') => keyboard.row().text(`⬅️ ${__('Back')}`, target);
   const typeLabel = (type) => __(TARGET_TYPE_LABELS[type] || type);
+  // Target keys look like "-100:2"; ':' is the callback-data separator, so keys travel as "-100_2".
+  const encodeKey = (key) => String(key).replace(':', '_');
+  const decodeKey = (data) => String(data).replace('_', ':');
+  // Wizard/target screens carry a context: a group id, or "-" when opened from the Targets list.
+  const ctxOf = (groupId) => groupId ?? '-';
+  const groupOfCtx = (value) => (value === '-' || value === undefined ? null : normalizeGroupId(value));
+  const backOfCtx = (groupId) => (groupId ? `g:${groupId}` : 'm:targets');
 
   function getPending(userId) {
     const entry = pending.get(userId);
@@ -55,6 +62,8 @@ function registerMenu({composer, controller, texts, logger}) {
       .row()
       .text(`📅 ${__('Schedule')}`, 'm:schedule')
       .text(`👥 ${__('Groups')}`, 'm:groups')
+      .row()
+      .text(`📣 ${__('Telegram targets')}`, 'm:targets')
       .row()
       .text(`⚙️ ${__('Settings')}`, 'm:settings')
       .text(`👤 ${__('Admins')}`, 'm:admins')
@@ -146,9 +155,9 @@ function registerMenu({composer, controller, texts, logger}) {
       if (target.enabled) {
         marker = target.error ? '⚠️' : '✅';
       }
-      keyboard.text(`${marker} ${targetName(target)}`, `tg:${groupId}:${target.key}`).row();
+      keyboard.text(`${marker} ${targetName(target)}`, `tg:${encodeKey(target.key)}:${groupId}`).text('➖', `tu:${groupId}:${encodeKey(target.key)}`).row();
     }
-    keyboard.text(`➕ ${__('Add target')}`, `ta:${groupId}`).row();
+    keyboard.text(`➕ ${__('Assign target')}`, `tas:${groupId}`).row();
     keyboard.text(`📅 ${__('Schedule')}`, `sc:${groupId}`).text(`🗑 ${__('Remove group')}`, `gr:${groupId}`);
     return {text: formatGroup(group), keyboard: back(keyboard, 'm:groups')};
   }
@@ -165,49 +174,81 @@ function registerMenu({composer, controller, texts, logger}) {
     return {text: escapeHtml(`${prompt}${hint}`), keyboard};
   }
 
-  // ---- targets ----
+  // ---- targets (global) ----
 
-  function findTarget(groupId, key) {
-    return controller.getGroup(groupId).telegramTargets.find((target) => target.key === key) ?? null;
+  function targetsScreen() {
+    const targets = controller.getTargets();
+    const keyboard = new InlineKeyboard();
+    for (const target of targets) {
+      let marker = '⏸';
+      if (target.enabled) {
+        marker = target.error ? '⚠️' : '✅';
+      }
+      keyboard.text(`${marker} ${targetName(target)}`, `tg:${encodeKey(target.key)}:-`).row();
+    }
+    keyboard.text(`➕ ${__('Add target')}`, 'ta:-');
+    return {text: targetsText(targets), keyboard: back(keyboard)};
   }
 
-  function targetScreen(groupId, key) {
-    const target = findTarget(groupId, key);
-    if (!target) {
-      return groupScreen(groupId);
+  function assignTargetScreen(groupId) {
+    const assigned = new Set(controller.getGroup(groupId).telegramTargets.map((target) => target.key));
+    const free = controller.getTargets().filter((target) => !assigned.has(target.key));
+    const keyboard = new InlineKeyboard();
+    for (const target of free) {
+      keyboard.text(`${target.enabled ? '✅' : '⏸'} ${targetName(target)}`, `taa:${groupId}:${encodeKey(target.key)}`).row();
     }
-    const keyboard = new InlineKeyboard()
-      .text(target.enabled ? `⏸ ${__('Disable')}` : `▶️ ${__('Enable')}`, `te:${groupId}:${key}`)
-      .text(`✏️ ${__('Label')}`, `tl:${groupId}:${key}`)
-      .row()
-      .text(`🗑 ${__('Remove target')}`, `tr:${groupId}:${key}`);
-    const lines = [`<b>${escapeHtml(__('Group {group}', {group: groupId}))} · ${escapeHtml(__('Target'))}</b>`, formatTarget(target)];
-    if (target.title) {
-      lines.push(`${escapeHtml(__('Chat title'))}: ${escapeHtml(target.title)}`);
-    }
+    keyboard.text(`➕ ${__('New target')}`, `ta:${groupId}`);
+    const lines = [`<b>${escapeHtml(__('Group {group}', {group: groupId}))} · ${escapeHtml(__('Assign target'))}</b>`];
+    lines.push(escapeHtml(free.length > 0 ? __('Choose an existing target or create a new one:') : __('All targets are already assigned. Create a new one:')));
     return {text: lines.join('\n'), keyboard: back(keyboard, `g:${groupId}`)};
   }
 
-  function targetRemoveScreen(groupId, key) {
-    const target = findTarget(groupId, key);
-    const keyboard = new InlineKeyboard().text(`🗑 ${__('Yes, remove')}`, `trc:${groupId}:${key}`).text(`❌ ${__('Cancel')}`, `tg:${groupId}:${key}`);
-    return {text: escapeHtml(__('Confirm removing target {target}?', {target: target ? targetName(target) : key})), keyboard};
+  function targetScreen(key, groupId = null) {
+    const target = controller.getTarget(key);
+    if (!target) {
+      return groupId ? groupScreen(groupId) : targetsScreen();
+    }
+    const ctx = ctxOf(groupId);
+    const keyboard = new InlineKeyboard()
+      .text(target.enabled ? `⏸ ${__('Disable')}` : `▶️ ${__('Enable')}`, `te:${encodeKey(key)}:${ctx}`)
+      .text(`✏️ ${__('Label')}`, `tl:${encodeKey(key)}:${ctx}`)
+      .row()
+      .text(`🗑 ${__('Remove target')}`, `tr:${encodeKey(key)}:${ctx}`);
+    const lines = [`<b>${escapeHtml(__('Target'))}</b>`, formatTarget(target)];
+    if (target.title) {
+      lines.push(`${escapeHtml(__('Chat title'))}: ${escapeHtml(target.title)}`);
+    }
+    const used = target.groups?.length ? target.groups.join(', ') : __('not assigned');
+    lines.push(`${escapeHtml(__('groups'))}: ${escapeHtml(used)}`);
+    return {text: lines.join('\n'), keyboard: back(keyboard, backOfCtx(groupId))};
+  }
+
+  function targetRemoveScreen(key, groupId = null) {
+    const target = controller.getTarget(key);
+    const ctx = ctxOf(groupId);
+    const keyboard = new InlineKeyboard().text(`🗑 ${__('Yes, remove')}`, `trc:${encodeKey(key)}:${ctx}`).text(`❌ ${__('Cancel')}`, `tg:${encodeKey(key)}:${ctx}`);
+    const lines = [__('Confirm removing target {target}?', {target: target ? targetName(target) : key})];
+    if (target?.groups?.length) {
+      lines.push(__('It will be unassigned from groups: {groups}', {groups: target.groups.join(', ')}));
+    }
+    return {text: escapeHtml(lines.join('\n')), keyboard};
   }
 
   function targetTypeScreen(groupId) {
+    const ctx = ctxOf(groupId);
     const keyboard = new InlineKeyboard();
     TARGET_TYPES.forEach((type, index) => {
-      keyboard.text(typeLabel(type), `tb:${groupId}:${type}:0`);
+      keyboard.text(typeLabel(type), `tb:${ctx}:${type}:0`);
       if ((index + 1) % 3 === 0) {
         keyboard.row();
       }
     });
     const text = `<b>${escapeHtml(__('Add target'))}</b>\n${escapeHtml(__('Choose the target type:'))}`;
-    return {text, keyboard: back(keyboard, `g:${groupId}`)};
+    return {text, keyboard: back(keyboard, groupId ? `tas:${groupId}` : 'm:targets')};
   }
 
   function typeChatScreen(groupId, type) {
-    const keyboard = new InlineKeyboard().text(`❌ ${__('Cancel')}`, `x:${groupId}`);
+    const keyboard = new InlineKeyboard().text(`❌ ${__('Cancel')}`, `x:${groupId ?? 'targets'}`);
     const lines = [__('Send the chat id (as <chatId> or <chatId>/<topicId>):')];
     lines.push(__('Tip: send /whoami inside the target group to learn its chat id and topic id.'));
     if (type === 'user' || type === 'bot') {
@@ -221,32 +262,33 @@ function registerMenu({composer, controller, texts, logger}) {
     if (dialogs === null) {
       return null;
     }
+    const ctx = ctxOf(groupId);
     const pages = Math.max(1, Math.ceil(dialogs.length / DIALOGS_PER_PAGE));
     const current = Math.min(Math.max(0, page), pages - 1);
     const keyboard = new InlineKeyboard();
     for (const dialog of dialogs.slice(current * DIALOGS_PER_PAGE, (current + 1) * DIALOGS_PER_PAGE)) {
-      keyboard.text(dialog.title.slice(0, 48), `ts:${groupId}:${type}:${dialog.chatId}`).row();
+      keyboard.text(dialog.title.slice(0, 48), `ts:${ctx}:${type}:${dialog.chatId}`).row();
     }
     if (pages > 1) {
       if (current > 0) {
-        keyboard.text(`◀️ ${__('Previous')}`, `tb:${groupId}:${type}:${current - 1}`);
+        keyboard.text(`◀️ ${__('Previous')}`, `tb:${ctx}:${type}:${current - 1}`);
       }
       if (current < pages - 1) {
-        keyboard.text(`${__('Next')} ▶️`, `tb:${groupId}:${type}:${current + 1}`);
+        keyboard.text(`${__('Next')} ▶️`, `tb:${ctx}:${type}:${current + 1}`);
       }
       keyboard.row();
     }
-    keyboard.text(`🔄 ${__('Refresh list')}`, `tf:${groupId}:${type}`).text(`⌨️ ${__('Type chat id')}`, `ti:${groupId}:${type}`);
+    keyboard.text(`🔄 ${__('Refresh list')}`, `tf:${ctx}:${type}`).text(`⌨️ ${__('Type chat id')}`, `ti:${ctx}:${type}`);
     const lines = [`<b>${escapeHtml(__('Add target'))} · ${escapeHtml(typeLabel(type))}</b>`];
     lines.push(escapeHtml(dialogs.length === 0 ? __('No chats of this type found.') : __('Choose the chat:')));
     if (pages > 1) {
       lines.push(escapeHtml(__('Page {page}/{pages}', {page: current + 1, pages})));
     }
-    return {text: lines.join('\n'), keyboard: back(keyboard, `ta:${groupId}`)};
+    return {text: lines.join('\n'), keyboard: back(keyboard, `ta:${ctx}`)};
   }
 
   function typeTopicScreen(groupId) {
-    const keyboard = new InlineKeyboard().text(`❌ ${__('Cancel')}`, `x:${groupId}`);
+    const keyboard = new InlineKeyboard().text(`❌ ${__('Cancel')}`, `x:${groupId ?? 'targets'}`);
     return {text: escapeHtml(__('Send the topic id:')), keyboard};
   }
 
@@ -255,9 +297,10 @@ function registerMenu({composer, controller, texts, logger}) {
     if (topics === null) {
       return null;
     }
+    const ctx = ctxOf(groupId);
     const keyboard = new InlineKeyboard();
     topics.slice(0, 50).forEach((topic, index) => {
-      keyboard.text(topic.title.slice(0, 30), `tt:${groupId}:${chatId}:${topic.topicId}`);
+      keyboard.text(topic.title.slice(0, 30), `tt:${ctx}:${chatId}:${topic.topicId}`);
       if ((index + 1) % 2 === 0) {
         keyboard.row();
       }
@@ -265,21 +308,21 @@ function registerMenu({composer, controller, texts, logger}) {
     if (topics.length % 2 !== 0) {
       keyboard.row();
     }
-    keyboard.text(`⌨️ ${__('Type topic id')}`, `tj:${groupId}:${chatId}`);
+    keyboard.text(`⌨️ ${__('Type topic id')}`, `tj:${ctx}:${chatId}`);
     const lines = [`<b>${escapeHtml(__('Add target'))} · ${escapeHtml(typeLabel('topic'))}</b>`];
     lines.push(escapeHtml(topics.length === 0 ? __('No topics found in this chat.') : __('Choose the topic:')));
-    return {text: lines.join('\n'), keyboard: back(keyboard, `tb:${groupId}:topic:0`)};
+    return {text: lines.join('\n'), keyboard: back(keyboard, `tb:${ctx}:topic:0`)};
   }
 
-  function labelScreen(groupId, key) {
-    const keyboard = new InlineKeyboard().text(`❌ ${__('Cancel')}`, `tg:${groupId}:${key}`);
+  function labelScreen(key, groupId = null) {
+    const keyboard = new InlineKeyboard().text(`❌ ${__('Cancel')}`, `tg:${encodeKey(key)}:${ctxOf(groupId)}`);
     return {text: escapeHtml(__('Send a label for this target (or "-" to clear):')), keyboard};
   }
 
   async function createTarget(ctx, userId, groupId, input, {forceNew = false} = {}) {
-    const target = await controller.addTarget(groupId, input);
+    const target = await controller.addTarget(input, groupId);
     pending.delete(userId);
-    await show(ctx, targetScreen(groupId, target.key), {forceNew});
+    await show(ctx, targetScreen(target.key, groupId), {forceNew});
     return target;
   }
 
@@ -377,6 +420,9 @@ function registerMenu({composer, controller, texts, logger}) {
     if (target === 'groups') {
       return groupsScreen();
     }
+    if (target === 'targets') {
+      return targetsScreen();
+    }
     const groupId = normalizeGroupId(target);
     return groupId ? groupScreen(groupId) : homeScreen();
   }
@@ -388,6 +434,7 @@ function registerMenu({composer, controller, texts, logger}) {
     status: statusScreen,
     schedule: () => scheduleScreen(),
     groups: groupsScreen,
+    targets: targetsScreen,
     settings: settingsScreen,
     help: helpScreen,
   };
@@ -460,19 +507,49 @@ function registerMenu({composer, controller, texts, logger}) {
     }
   }
 
-  async function handleTargetAction(ctx, userId, kind, parts) {
+  /** Group-bound target actions: assign picker, assign, unassign. */
+  async function handleGroupTargetAction(ctx, userId, kind, parts) {
     const groupId = normalizeGroupId(parts[0]);
     if (groupId === null) {
       await ctx.answerCallbackQuery({text: __('Invalid group id: {value}', {value: parts[0]})});
       return;
     }
+    if (kind === 'tas') {
+      pending.delete(userId);
+      await ctx.answerCallbackQuery();
+      await show(ctx, assignTargetScreen(groupId));
+      return;
+    }
+    const key = decodeKey(parts[1]);
+    if (kind === 'taa') {
+      await controller.assignTarget(groupId, key);
+      await ctx.answerCallbackQuery({text: __('Target assigned to group {group}.', {group: groupId})});
+      await show(ctx, groupScreen(groupId));
+      return;
+    }
+    if (kind === 'tu') {
+      await controller.unassignTarget(groupId, key);
+      await ctx.answerCallbackQuery({text: __('Target unassigned from group {group}.', {group: groupId})});
+      await show(ctx, groupScreen(groupId));
+      return;
+    }
+    await ctx.answerCallbackQuery();
+  }
+
+  /** Add-target wizard: ta/tb/tf/ti/ts/tj/tt carry a context (group id or "-"). */
+  async function handleWizardAction(ctx, userId, kind, parts) {
+    const groupId = groupOfCtx(parts[0]);
+    if (parts[0] !== '-' && groupId === null) {
+      await ctx.answerCallbackQuery({text: __('Invalid group id: {value}', {value: parts[0]})});
+      return;
+    }
     switch (kind) {
-      case 'ta': // choose type
+      case 'ta':
         pending.delete(userId);
         await ctx.answerCallbackQuery();
         await show(ctx, targetTypeScreen(groupId));
         return;
-      case 'tb': // list chats of a type (page) or ask for an id
+      case 'tb':
       case 'tf': {
         const type = parts[1];
         if (!TARGET_TYPES.includes(type)) {
@@ -489,63 +566,68 @@ function registerMenu({composer, controller, texts, logger}) {
         }
         return;
       }
-      case 'ti': { // type the chat id
+      case 'ti': {
         const type = parts[1];
         setPending(userId, {kind: 'targetChat', groupId, type});
         await ctx.answerCallbackQuery();
         await show(ctx, typeChatScreen(groupId, type));
         return;
       }
-      case 'ts': { // chat chosen from the list
+      case 'ts': {
         const type = parts[1];
         const chatId = Number.parseInt(parts[2], 10);
         await ctx.answerCallbackQuery();
         await continueWithChat(ctx, userId, groupId, type, chatId, null);
         return;
       }
-      case 'tj': { // type the topic id
+      case 'tj': {
         setPending(userId, {kind: 'targetTopic', groupId, chatId: Number.parseInt(parts[1], 10)});
         await ctx.answerCallbackQuery();
         await show(ctx, typeTopicScreen(groupId));
         return;
       }
-      case 'tt': { // topic chosen from the list
+      case 'tt': {
         await ctx.answerCallbackQuery({text: __('Target added.')});
         await createTarget(ctx, userId, groupId, {type: 'topic', chatId: Number.parseInt(parts[1], 10), topicId: Number.parseInt(parts[2], 10)});
         return;
       }
       default:
-        break;
+        await ctx.answerCallbackQuery();
     }
-    const key = parts[1];
+  }
+
+  /** Target screen actions: tg/te/tl/tr/trc carry the encoded key and a context. */
+  async function handleTargetAction(ctx, userId, kind, parts) {
+    const key = decodeKey(parts[0]);
+    const groupId = groupOfCtx(parts[1]);
     switch (kind) {
       case 'tg':
         pending.delete(userId);
         await ctx.answerCallbackQuery();
-        await show(ctx, targetScreen(groupId, key));
+        await show(ctx, targetScreen(key, groupId));
         return;
       case 'te': {
-        const target = findTarget(groupId, key);
+        const target = controller.getTarget(key);
         if (target) {
-          await controller.updateTarget(groupId, key, {enabled: !target.enabled});
+          await controller.updateTarget(key, {enabled: !target.enabled});
         }
         await ctx.answerCallbackQuery();
-        await show(ctx, targetScreen(groupId, key));
+        await show(ctx, targetScreen(key, groupId));
         return;
       }
       case 'tl':
         setPending(userId, {kind: 'targetLabel', groupId, key});
         await ctx.answerCallbackQuery();
-        await show(ctx, labelScreen(groupId, key));
+        await show(ctx, labelScreen(key, groupId));
         return;
       case 'tr':
         await ctx.answerCallbackQuery();
-        await show(ctx, targetRemoveScreen(groupId, key));
+        await show(ctx, targetRemoveScreen(key, groupId));
         return;
       case 'trc':
-        await controller.removeTarget(groupId, key);
+        await controller.removeTarget(key);
         await ctx.answerCallbackQuery({text: __('Target removed.')});
-        await show(ctx, groupScreen(groupId));
+        await show(ctx, groupId ? groupScreen(groupId) : targetsScreen());
         return;
       default:
         await ctx.answerCallbackQuery();
@@ -618,7 +700,11 @@ function registerMenu({composer, controller, texts, logger}) {
         await show(ctx, typeGroupScreen());
       } else if (['g', 'ge', 'gc', 'gr', 'grc'].includes(kind)) {
         await handleGroupAction(ctx, userId, kind, parts);
-      } else if (['ta', 'tb', 'tf', 'ti', 'ts', 'tj', 'tt', 'tg', 'te', 'tl', 'tr', 'trc'].includes(kind)) {
+      } else if (['tas', 'taa', 'tu'].includes(kind)) {
+        await handleGroupTargetAction(ctx, userId, kind, parts);
+      } else if (['ta', 'tb', 'tf', 'ti', 'ts', 'tj', 'tt'].includes(kind)) {
+        await handleWizardAction(ctx, userId, kind, parts);
+      } else if (['tg', 'te', 'tl', 'tr', 'trc'].includes(kind)) {
         await handleTargetAction(ctx, userId, kind, parts);
       } else if (kind === 's') {
         await handleSettingsAction(ctx, parts);
@@ -678,9 +764,9 @@ function registerMenu({composer, controller, texts, logger}) {
         return;
       }
       case 'targetLabel': {
-        await controller.updateTarget(entry.groupId, entry.key, {label: value === '-' ? null : value});
+        await controller.updateTarget(entry.key, {label: value === '-' ? null : value});
         pending.delete(userId);
-        await show(ctx, targetScreen(entry.groupId, entry.key), {forceNew: true});
+        await show(ctx, targetScreen(entry.key, entry.groupId), {forceNew: true});
         return;
       }
       case 'interval': {

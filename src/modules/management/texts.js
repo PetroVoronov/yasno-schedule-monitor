@@ -61,7 +61,9 @@ const COMMAND_DESCRIPTIONS = [
   ['check', 'Check Yasno for schedule changes now'],
   ['schedule', 'Show the last fetched schedule'],
   ['groups', 'List configured groups'],
-  ['group', 'Show or change a group: /group <id> [set|unset <field> [value]]'],
+  ['group', 'Show or change a group: /group <id> [set|unset <field> [value] | target …]'],
+  ['targets', 'List Telegram targets'],
+  ['target', 'Manage a Telegram target: /target add|remove|enable|disable|label …'],
   ['interval', 'Set check interval in minutes'],
   ['pin', 'Pin update messages: on|off'],
   ['unpinprev', 'Unpin previous message after pinning: on|off'],
@@ -93,7 +95,7 @@ function createTexts({controller, i18n, timeZone}) {
       lines.push(`/${command} - ${escapeHtml(__(description))}`);
     }
     lines.push('');
-    lines.push(escapeHtml(__('Group fields: calendar, svitlobot. Telegram targets: /group <id> target add <chatId>[/<topicId>] [label]. Group ids as in Yasno, e.g. 1.1 or 60.1.')));
+    lines.push(escapeHtml(__('Group fields: calendar, svitlobot. Targets are configured once with /target and assigned to groups with /group <id> target assign <chatId>[/<topicId>]. Group ids as in Yasno, e.g. 1.1 or 60.1.')));
     return lines.join('\n');
   }
 
@@ -118,6 +120,19 @@ function createTexts({controller, i18n, timeZone}) {
       parts.push(`⚠️ ${escapeHtml(__('not resolved'))}`);
     }
     return parts.join(' ');
+  }
+
+  function targetsText(targets) {
+    if (targets.length === 0) {
+      return escapeHtml(__('No Telegram targets configured yet.'));
+    }
+    const lines = [`<b>${escapeHtml(__('Telegram targets'))}</b>`];
+    for (const target of targets) {
+      lines.push(formatTarget(target));
+      const used = Array.isArray(target.groups) && target.groups.length > 0 ? target.groups.join(', ') : __('not assigned');
+      lines.push(`    ↳ ${escapeHtml(__('groups'))}: ${escapeHtml(used)}`);
+    }
+    return lines.join('\n');
   }
 
   function formatGroup(group) {
@@ -236,7 +251,7 @@ function createTexts({controller, i18n, timeZone}) {
     return `<b>${escapeHtml(__('Known Yasno statuses'))}</b>\n${statusLines}`;
   }
 
-  return {__, yesNo, none, helpText, formatGroup, formatTarget, targetName, statusText, scheduleText, whoamiText, adminsText, statusesText};
+  return {__, yesNo, none, helpText, formatGroup, formatTarget, targetName, targetsText, statusText, scheduleText, whoamiText, adminsText, statusesText};
 }
 
 module.exports = {

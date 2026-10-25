@@ -146,7 +146,7 @@ let telegramClient = null;
 let telegramBot = null;
 let managementBot = null;
 let management = null;
-/** Resolved Telegram targets: "<group>|<chatId>:<topicId>" -> {title, entity, chatType, error}. */
+/** Resolved Telegram targets by key "<chatId>:<topicId>" -> {title, entity, chatType, error}. */
 const telegramTargetRuntime = new Map();
 const dialogsCacheTtlMs = 5 * 60 * 1000;
 let dialogsCache = { items: [], at: 0 };
@@ -811,8 +811,8 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
     return;
   }
   for (const target of targets) {
-    const key = targetKey(target);
-    const info = telegramTargetRuntime.get(`${group}|${key}`);
+    const key = target.key;
+    const info = telegramTargetRuntime.get(key);
     if (!info || info.error) {
       const reason = info?.error ? `: ${info.error}` : '';
       log.warn(`Telegram target ${key} for group ${group} is not available, message skipped${reason}`);
@@ -1074,40 +1074,42 @@ async function resolveTargetAsUser(target) {
 }
 
 /**
- * Resolve one target of a group and remember the result for sending and for /status.
+ * Resolve one target and remember the result for sending and for /status.
  * @returns {Promise<object|null>} runtime info, or null when disabled or unavailable.
  */
-async function resolveTarget(group, target) {
-  const runtimeKey = `${group}|${targetKey(target)}`;
-  telegramTargetRuntime.delete(runtimeKey);
+async function resolveTarget(target) {
+  const key = targetKey(target);
+  telegramTargetRuntime.delete(key);
   if (!target.enabled) {
     return null;
   }
   try {
     const info = options.asUser === true ? await resolveTargetAsUser(target) : await resolveTargetAsBot(target);
-    telegramTargetRuntime.set(runtimeKey, info);
-    log.debug(`Telegram target "${info.title}" (${targetKey(target)}) for group ${group} resolved as ${info.chatType}`);
+    telegramTargetRuntime.set(key, info);
+    log.debug(`Telegram target "${info.title}" (${key}) resolved as ${info.chatType}`);
     return info;
   } catch (error) {
     const message = String(error?.message || error);
-    telegramTargetRuntime.set(runtimeKey, { title: null, entity: null, chatType: null, error: message });
-    log.warn(`Telegram target ${targetKey(target)} for group ${group} is not available: ${message}`);
+    telegramTargetRuntime.set(key, { title: null, entity: null, chatType: null, error: message });
+    log.warn(`Telegram target ${key} is not available: ${message}`);
     return null;
   }
 }
 
-async function resolveGroupTargets(group) {
-  const targets = settings.listTargets(group);
-  for (const [key] of telegramTargetRuntime) {
-    if (key.startsWith(`${group}|`) && !targets.some((target) => `${group}|${targetKey(target)}` === key)) {
+async function resolveAllTargets() {
+  const targets = settings.listAllTargets();
+  for (const key of [...telegramTargetRuntime.keys()]) {
+    if (!targets.some((target) => target.key === key)) {
       telegramTargetRuntime.delete(key);
     }
   }
-  if (targets.length === 0) {
-    log.warn(`No Telegram targets configured for group ${group}! No notification will be sent!`);
-  }
   for (const target of targets) {
-    await resolveTarget(group, target);
+    await resolveTarget(target);
+  }
+  for (const group of groups) {
+    if (settings.listTargets(group).length === 0) {
+      log.warn(`No Telegram targets assigned to group ${group}! No notification will be sent!`);
+    }
   }
 }
 
@@ -1152,22 +1154,24 @@ async function telegramUnpinMessage(target, info, messageId) {
 
 // -------- Management interface --------
 
+function withRuntime(target) {
+  const info = telegramTargetRuntime.get(target.key);
+  return {
+    ...target,
+    title: info?.title ?? null,
+    chatType: info?.chatType ?? null,
+    error: info?.error ?? null,
+    resolved: Boolean(info && !info.error),
+    groups: settings.groupsUsingTarget(target.key),
+  };
+}
+
 function buildGroupStatus(groupId) {
   const group = settings.getGroup(groupId);
   return {
     id: groupId,
     ...group,
-    telegramTargets: group.telegramTargets.map((target) => {
-      const info = telegramTargetRuntime.get(`${groupId}|${targetKey(target)}`);
-      return {
-        ...target,
-        key: targetKey(target),
-        title: info?.title ?? null,
-        chatType: info?.chatType ?? null,
-        error: info?.error ?? null,
-        resolved: Boolean(info && !info.error),
-      };
-    }),
+    telegramTargets: settings.listTargets(groupId).map(withRuntime),
   };
 }
 
@@ -1216,22 +1220,34 @@ const managementController = {
   removeGroup: async (groupId) => {
     settings.removeGroup(groupId);
     refreshGroups();
-    await resolveGroupTargets(groupId);
     lastYasnoChecksum = null;
   },
-  addTarget: async (groupId, input) => {
-    const target = settings.addTarget(groupId, input);
-    await resolveTarget(groupId, target);
-    return buildGroupStatus(groupId).telegramTargets.find((item) => item.key === targetKey(target));
+  getTargets: () => settings.listAllTargets().map(withRuntime),
+  getTarget: (key) => {
+    const target = settings.getTarget(key);
+    return target ? withRuntime(target) : null;
   },
-  updateTarget: async (groupId, key, patch) => {
-    const target = settings.updateTarget(groupId, key, patch);
-    await resolveTarget(groupId, target);
-    return buildGroupStatus(groupId).telegramTargets.find((item) => item.key === key);
+  addTarget: async (input, groupId = null) => {
+    const target = groupId ? settings.addTargetToGroup(groupId, input) : settings.addTarget(input);
+    await resolveTarget(target);
+    return withRuntime(target);
   },
-  removeTarget: async (groupId, key) => {
-    settings.removeTarget(groupId, key);
-    telegramTargetRuntime.delete(`${groupId}|${key}`);
+  updateTarget: async (key, patch) => {
+    const target = settings.updateTarget(key, patch);
+    await resolveTarget(target);
+    return withRuntime(target);
+  },
+  removeTarget: async (key) => {
+    const affected = settings.removeTarget(key);
+    telegramTargetRuntime.delete(key);
+    return affected;
+  },
+  assignTarget: async (groupId, key) => {
+    settings.assignTarget(groupId, key);
+    return buildGroupStatus(groupId);
+  },
+  unassignTarget: async (groupId, key) => {
+    settings.unassignTarget(groupId, key);
     return buildGroupStatus(groupId);
   },
   listDialogs: (type, force) => listDialogs(type, force),
@@ -1326,9 +1342,7 @@ process.on('SIGTERM', gracefulExit);
 (async () => {
   try {
     telegramClient = await getTelegramClient();
-    for (const group of groups) {
-      await resolveGroupTargets(group);
-    }
+    await resolveAllTargets();
     await startManagement();
     scheduleChecks();
     // Initial check
