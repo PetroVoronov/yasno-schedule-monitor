@@ -57,6 +57,8 @@ Precedence for every setting:
 | `TELEGRAM_TOPIC_ID_GROUP_<g>_<s>` | Legacy: topic id applied to the first chat id (optional). |
 | `SVITLOBOT_CHANNEL_ID_GROUP_<g>_<s>` | Comma separated svitlobot channel keys to update (optional). |
 
+Values may be quoted or not. Docker's `--env-file` keeps quotes as part of the value while Node's `--env-file` strips them; both forms are accepted.
+
 `<g>_<s>` is the group id with the dot replaced by an underscore, e.g. `CALENDAR_ID_GROUP_12_1`. `CALENDAR_ID_GROUP_2` is accepted as `2.1`. Ids that Yasno does not return are rejected with a warning once the group list has been fetched.
 
 ### Command line

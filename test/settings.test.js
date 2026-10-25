@@ -258,6 +258,28 @@ describe('Settings env seeding', () => {
   });
 });
 
+describe('Settings env quoting', () => {
+  test('values quoted as docker --env-file passes them are accepted', () => {
+    const warn = jest.fn();
+    const settings = new Settings({filePath: path.join(tmpDir(), 'config.json'), logger: {warn}});
+    settings.init();
+    const token = '1234567890:' + 'D'.repeat(35);
+    settings.seedFromEnv({
+      TELEGRAM_ADMIN_IDS: '"5442917158, 42"',
+      TELEGRAM_BOT_AUTH_TOKEN: `'${token}'`,
+      CALENDAR_ID_GROUP_1_1: '"cal@group"',
+      TELEGRAM_CHAT_ID_GROUP_1_1: '"-100/2"',
+    });
+    expect(settings.getAdminIds()).toEqual([5442917158, 42]);
+    expect(settings.getBotToken()).toBe(token);
+    expect(settings.getGroup('1.1')).toMatchObject({calendarId: 'cal@group', targetKeys: ['-100:2']});
+    expect(warn).not.toHaveBeenCalled();
+    settings.setAdminIds([]);
+    settings.seedFromEnv({TELEGRAM_ADMIN_IDS: 'me'});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no valid Telegram user ids'));
+  });
+});
+
 describe('Settings legacy import', () => {
   test('imports node-localstorage files once and leaves them in place', () => {
     const dir = tmpDir();

@@ -89,6 +89,18 @@ function parseChannelIds(value) {
   return parseChannelIds(value.split(','));
 }
 
+/** Strip one pair of matching surrounding quotes, as left in place by docker --env-file. */
+function unquoteEnvValue(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const text = value.trim();
+  if (text.length >= 2 && ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'")))) {
+    return text.slice(1, -1);
+  }
+  return text;
+}
+
 function parseInteger(value) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) ? parsed : null;
@@ -612,8 +624,11 @@ class Settings {
    * @param {NodeJS.ProcessEnv} env
    * @returns {string[]} Names of the environment variables that were applied.
    */
-  seedFromEnv(env = process.env) {
+  seedFromEnv(rawEnv = process.env) {
     const applied = [];
+    // Docker's --env-file passes values literally (quotes included) while Node's --env-file strips
+    // them, so accept both: drop one pair of matching surrounding quotes from every value.
+    const env = Object.fromEntries(Object.entries(rawEnv).map(([name, value]) => [name, unquoteEnvValue(value)]));
     const warn = (name) => this.#logger?.warn?.(`Environment variable ${name} differs from the stored value; the stored value is used.`);
     const seed = (name, isEmpty, apply, equals) => {
       const raw = env[name];
@@ -644,6 +659,9 @@ class Settings {
       (value) => this.store.set(['telegram', 'managementBotToken'], value),
       (value) => this.getManagementBotToken() === value,
     );
+    if (typeof env.TELEGRAM_ADMIN_IDS === 'string' && env.TELEGRAM_ADMIN_IDS.trim().length > 0 && parseAdminIds(env.TELEGRAM_ADMIN_IDS).length === 0) {
+      this.#logger?.warn?.('Environment variable TELEGRAM_ADMIN_IDS contains no valid Telegram user ids (expected comma separated integers).');
+    }
     seed(
       'TELEGRAM_ADMIN_IDS',
       () => this.getAdminIds().length === 0,
@@ -875,4 +893,5 @@ module.exports = {
   parseAdminIds,
   parseChannelIds,
   parseInteger,
+  unquoteEnvValue,
 };
