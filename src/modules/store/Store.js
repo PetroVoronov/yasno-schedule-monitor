@@ -110,7 +110,6 @@ class Store {
     fs.renameSync(tmpPath, this.#filePath);
     try {
       fs.chmodSync(this.#filePath, this.#fileMode);
-      // eslint-disable-next-line sonarjs/no-ignored-exceptions
     } catch (error) {
       // chmod can fail on some mounted filesystems (e.g. Windows bind mounts); the file is still written.
     }

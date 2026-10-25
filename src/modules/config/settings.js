@@ -764,14 +764,12 @@ class Settings {
       let key;
       try {
         key = decodeURIComponent(entry.name);
-        // eslint-disable-next-line sonarjs/no-ignored-exceptions
       } catch (error) {
         key = entry.name;
       }
       const raw = fs.readFileSync(path.join(dir, entry.name), 'utf8');
       try {
         legacy[key] = JSON.parse(raw);
-        // eslint-disable-next-line sonarjs/no-ignored-exceptions
       } catch (error) {
         legacy[key] = raw;
       }
