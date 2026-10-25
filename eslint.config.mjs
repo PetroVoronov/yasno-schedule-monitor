@@ -5,9 +5,11 @@ import babelParser from "@babel/eslint-parser";
 
 export default [
 
+    {
+        ignores: ["eslint.config.mjs", "node_modules/", "data/"],
+    },
     sonarjs.configs.recommended,
     {
-        ignores: ["eslint.config.mjs", "node_modules/"],
         languageOptions: {
             globals: {
                 ...Object.fromEntries(Object.entries(globals.browser).map(([key]) => [key, "off"])),

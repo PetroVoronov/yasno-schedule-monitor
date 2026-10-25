@@ -1,130 +1,155 @@
 const { Api, TelegramClient } = require('teleproto');
-const { Api: GrammyApi } = require('grammy');
-const { StringSession, StoreSession } = require('teleproto/sessions');
+const { Bot } = require('grammy');
+const { StoreSession } = require('teleproto/sessions');
 const readline = require('node:readline/promises');
 const { stdin: input, stdout: output, exit } = require('node:process');
 const stringify = require('json-stringify-safe');
-const { LocalStorage } = require('node-localstorage');
 const { Command, Option, InvalidOptionArgumentError } = require('commander');
-const { Cache } = require('./modules/cache/Cache');
 const { securedLogger: log } = require('./modules/logging/logging');
 const { name: scriptName, version: scriptVersion } = require('./version');
 const i18n = require('./modules/i18n/i18n.config');
+const { Settings, parseAdminIds, targetKey, BOT_TOKEN_MIN_LENGTH } = require('./modules/config/settings');
+const { createManagementBot } = require('./modules/management/management');
 const axios = require('axios');
 const fs = require('node:fs');
+const path = require('node:path');
 const { toZonedTime, format: formatTz } = require('date-fns-tz');
 const template = require('string-template');
 const { google } = require('googleapis');
 const crypto = require('node:crypto');
 
-
 const timeZone = 'Europe/Kiev'; // Replace with your desired time zone
 
 const program = new Command();
+
+function parseInterval(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 120) {
+    throw new InvalidOptionArgumentError('Interval must be a number between 1 and 120 minutes.');
+  }
+  return parsed;
+}
 
 program
   .name(scriptName)
   .version(scriptVersion, '-v, --version', 'Show version number and exit')
   .option('--as-user', 'Start as user instance (bot instance by default)')
   .addOption(
-    new Option('-i, --schedule-update-interval <minutes>', 'Update interval for schedule in minutes')
-      .default(5)
-      .argParser((value) => {
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 120) {
-          throw new InvalidOptionArgumentError('Interval must be a number between 1 and 120 minutes.');
-        }
-        return parsed;
-      })
+    new Option('-i, --schedule-update-interval <minutes>', 'Update interval for schedule in minutes').default(5).argParser(parseInterval),
   )
   .option('-l, --language <code>', 'Language code for i18n', 'uk')
   .option('-d, --debug', 'Enable debug level logging')
   .option('--pin-message', 'Pin update messages in Telegram')
   .option('--unpin-previous', 'Unpin previous messages after pinning a new one')
   .option('--ignore-status', 'Process schedules even if status is not ScheduleApplies')
-  .addOption(
-    new Option('--max-group-number <number>', 'Maximum group number to process')
-      .default(6)
-      .argParser((value) => {
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 999) {
-          throw new InvalidOptionArgumentError('Maximum group number must be a number between 1 and 999.');
-        }
-        return parsed;
-      })
-  );
+  .option('--admin-ids <ids>', 'Comma separated Telegram user ids allowed to manage the monitor via the bot')
+  .option('--data-dir <path>', 'Directory for configuration, state and credentials', 'data')
+  .addOption(new Option('--max-group-number <number>', 'Deprecated: group ids are taken from the Yasno API').hideHelp());
 
 program.parse(process.argv);
 
 const parsedOptions = program.opts();
 
-const options = {
-  asUser: Boolean(parsedOptions.asUser),
-  scheduleUpdateInterval: parsedOptions.scheduleUpdateInterval,
-  language: parsedOptions.language,
-  debug: Boolean(parsedOptions.debug),
-  pinMessage: Boolean(parsedOptions.pinMessage),
-  unpinPrevious: Boolean(parsedOptions.unpinPrevious),
-  ignoreStatus: Boolean(parsedOptions.ignoreStatus),
-  maxGroupNumber: parsedOptions.maxGroupNumber,
-};
+const dataDir = parsedOptions.dataDir;
+const configFilePath = path.join(dataDir, 'config.json');
+const legacyStorageDir = path.join(dataDir, 'storage');
+const keyFilePath = path.join(dataDir, 'yasno-monitor.json'); // path to JSON with private key been downloaded from Google
+const sessionDir = path.join(dataDir, 'session');
 
 log.setTimeZone(timeZone);
-if (options.debug) {
+if (parsedOptions.debug) {
   log.setLevel('debug');
 }
+if (parsedOptions.maxGroupNumber !== undefined) {
+  log.warn('Option --max-group-number is deprecated and ignored: group ids are taken from the Yasno API.');
+}
 
+const settings = new Settings({ filePath: configFilePath, logger: log });
+settings.init({ legacyDir: legacyStorageDir });
+settings.seedFromEnv(process.env);
+
+/**
+ * Effective option value: a CLI flag given explicitly wins, otherwise a value stored via the
+ * management interface, otherwise the CLI default.
+ */
+function resolveOption(name, cliValue) {
+  const source = program.getOptionValueSource(name);
+  if (source === 'cli' || source === 'env') {
+    return cliValue;
+  }
+  const stored = settings.getOption(name);
+  return stored === null ? cliValue : stored;
+}
+
+const options = {
+  asUser: Boolean(parsedOptions.asUser),
+  scheduleUpdateInterval: resolveOption('scheduleUpdateInterval', parsedOptions.scheduleUpdateInterval),
+  language: parsedOptions.language,
+  debug: Boolean(resolveOption('debug', Boolean(parsedOptions.debug))),
+  pinMessage: Boolean(resolveOption('pinMessage', Boolean(parsedOptions.pinMessage))),
+  unpinPrevious: Boolean(resolveOption('unpinPrevious', Boolean(parsedOptions.unpinPrevious))),
+  ignoreStatus: Boolean(resolveOption('ignoreStatus', Boolean(parsedOptions.ignoreStatus))),
+};
+
+if (typeof parsedOptions.adminIds === 'string' && parsedOptions.adminIds.length > 0) {
+  const cliAdminIds = parseAdminIds(parsedOptions.adminIds);
+  if (cliAdminIds.length > 0 && JSON.stringify(cliAdminIds) !== JSON.stringify(settings.getAdminIds())) {
+    settings.setAdminIds(cliAdminIds);
+  }
+}
+
+log.setLevel(options.debug ? 'debug' : 'info');
 
 i18n.setLocale(options.language);
-
 
 log.info(`Starting ${scriptName} v${scriptVersion} ...`);
 log.info(`As user: ${options.asUser}`);
 log.info(`Language: ${options.language}`);
 log.info(`Schedule update interval: ${options.scheduleUpdateInterval} minutes`);
 log.info(`Debug: ${options.debug}`);
+log.info(`Configuration file: ${configFilePath}`);
 
+/** Ids of the groups that are actively monitored (those with a calendar configured). */
 const groups = [];
 
-log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
+function refreshGroups() {
+  const configured = settings.configuredGroupIds();
+  groups.length = 0;
+  groups.push(...configured);
+  log.appendMaskWord(...groups.map((group) => `calendarIdGroup${group}`));
+  log.info(`Active groups: ${groups.length > 0 ? groups.join(', ') : 'none'}`);
+  return groups;
+}
 
-
+refreshGroups();
 
 const yasnoApiUrl = 'https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages';
 const yasnoMainUrl = 'https://static.yasno.ua/kyiv/outages';
 const svitlobotApiUrl = 'https://api.svitlobot.in.ua/';
 
-const storage = new LocalStorage('data/storage');
-const cache = new Cache({
-  getItem: (key) => storage.getItem(key),
-  setItem: (key, value) => storage.setItem(key, value),
-  removeItem: (key) => storage.removeItem(key),
-});
-
-const keyFilePath = 'data/yasno-monitor.json'; // path to JSON with private key been downloaded from Google
 const calendarScope = 'https://www.googleapis.com/auth/calendar'; // authorization scopes
 const calendarEventsScope = 'https://www.googleapis.com/auth/calendar.events';
 
 const calendarEventSummary = i18n.__('Power outage. Group {group}');
 const calendarEventDescription = i18n.__('Planned power outage by information from {url}, on {timestamp}');
 
-
 const textScheduleUpdated = i18n.__('Schedule for {today} ({date}) has been updated');
 const textToday = i18n.__('today');
 const textTomorrow = i18n.__('tomorrow');
 const textScheduleOutageDefiniteLine = i18n.__('- off: {start} - {end}');
 const textScheduleUpdatedAt = i18n.__('Data updated at {timestamp}');
-const textScheduleNotApplies = i18n.__('Schedule not in effect yet.');
 const textScheduleNoOutages = i18n.__('no outages!');
 const textScheduleEmergencyUnavailable = i18n.__('emergency outages! Schedule is not available!');
 const statusesWithScheduleApplied = ['scheduleapplies', 'emergencyshutdowns'];
 
-
-
-
 let telegramClient = null;
-let telegramTargetEntities = {};
-let telegramTargetTitles = {};
+let telegramBot = null;
+let managementBot = null;
+let management = null;
+/** Resolved Telegram targets by key "<chatId>:<topicId>" -> {title, entity, chatType, error}. */
+const telegramTargetRuntime = new Map();
+const dialogsCacheTtlMs = 5 * 60 * 1000;
+let dialogsCache = { items: [], at: 0 };
 
 let cachedPrivateKey = null;
 let cachedCalendarAuth = null;
@@ -132,90 +157,119 @@ let cachedCalendarService = null;
 const calendarEventsCache = new Map();
 let lastYasnoChecksum = null;
 
-const botAuthTokenMinimumLength = 43;
-
 const telegramParseMode = 'html';
 
-for (let group = 1; group <= options.maxGroupNumber; group++) {
-  const oldCalendarId = cache.getItem(`calendarIdGroup${group}`);
-  if (typeof oldCalendarId === 'string' && oldCalendarId.length > 0) {
-    cache.setItem(`calendarIdGroup${group}.1`, oldCalendarId);
-    cache.removeItem(`calendarIdGroup${group}`);
-  }
-  const oldTelegramChatId = cache.getItem(`telegramChatIdGroup${group}`);
-  if (typeof oldTelegramChatId === 'number' && oldTelegramChatId !== 0) {
-    cache.setItem(`telegramChatIdGroup${group}.1`, oldTelegramChatId);
-    cache.removeItem(`telegramChatIdGroup${group}`);
-  }
-  const oldTelegramTopicId = cache.getItem(`telegramTopicIdGroup${group}`);
-  if (typeof oldTelegramTopicId === 'number' && oldTelegramTopicId >= 0) {
-    cache.setItem(`telegramTopicIdGroup${group}.1`, oldTelegramTopicId);
-    cache.removeItem(`telegramTopicIdGroup${group}`);
-  }
-  for (let subGroup = 1; subGroup <= 2; subGroup++) {
-    const envId = `${group}_${subGroup}`;
-    const groupId = `${group}.${subGroup}`;
-    if (typeof process.env[`CALENDAR_ID_GROUP_${envId}`] === 'string' && process.env[`CALENDAR_ID_GROUP_${envId}`].length > 0) {
-      cache.setItem(`calendarIdGroup${groupId}`, process.env[`CALENDAR_ID_GROUP_${envId}`]);
-    }
-    if (typeof process.env[`TELEGRAM_CHAT_ID_GROUP_${envId}`] === 'string' && process.env[`TELEGRAM_CHAT_ID_GROUP_${envId}`].length > 0) {
-      cache.setItem(`telegramChatIdGroup${groupId}`, parseInt(process.env[`TELEGRAM_CHAT_ID_GROUP_${envId}`]));
-    }
-    if (typeof process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`] === 'string' && process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`].length > 0) {
-      cache.setItem(`telegramTopicIdGroup${groupId}`, parseInt(process.env[`TELEGRAM_TOPIC_ID_GROUP_${envId}`]));
-    }
-    if (typeof process.env[`SVITLOBOT_CHANNEL_ID_GROUP_${envId}`] === 'string' && process.env[`SVITLOBOT_CHANNEL_ID_GROUP_${envId}`].length > 0) {
-      cache.setItem(`svitlobotChannelIdGroup${groupId}`, process.env[`SVITLOBOT_CHANNEL_ID_GROUP_${envId}`]);
-    }
-    const calendarId = cache.getItem(`calendarIdGroup${groupId}`);
-    if (typeof calendarId === 'string' && calendarId.length > 0) {
-      groups.push(groupId);
-    }
-  }
+/** Runtime state exposed to the management interface. */
+const runtime = {
+  startedAt: Date.now(),
+  lastCheckAt: null,
+  lastChangeAt: null,
+  lastError: null,
+  nextCheckAt: null,
+  checkInProgress: false,
+  lastSchedule: null,
 };
 
-let knownYasnoStatuses = cache.getItem(`knownYasnoStatuses`);
-if (!knownYasnoStatuses || typeof knownYasnoStatuses !== 'object') {
-  knownYasnoStatuses = {};
-  cache.setItem(`knownYasnoStatuses`, knownYasnoStatuses);
+let checkTimer = null;
+
+function scheduleChecks() {
+  if (checkTimer !== null) {
+    clearInterval(checkTimer);
+  }
+  const intervalMs = options.scheduleUpdateInterval * 60 * 1000;
+  checkTimer = setInterval(() => {
+    checkForUpdates().catch((error) => log.error(`Scheduled check failed: ${error?.stack || error}`));
+    runtime.nextCheckAt = Date.now() + intervalMs;
+  }, intervalMs);
+  runtime.nextCheckAt = Date.now() + intervalMs;
 }
 
-
-async function checkForUpdates() {
+/**
+ * Fetch the Yasno payload and process schedule changes.
+ * @param {object} [params]
+ * @param {boolean} [params.force] - Process even when the payload checksum is unchanged.
+ * @returns {Promise<{changed: boolean, skipped: boolean, error: string|null}>}
+ */
+async function checkForUpdates({ force = false } = {}) {
+  if (runtime.checkInProgress) {
+    log.debug('Check already in progress, skipping.');
+    return { changed: false, skipped: true, error: null };
+  }
+  runtime.checkInProgress = true;
+  runtime.lastCheckAt = Date.now();
   let currentData;
   let payloadChecksum = null;
   const todayStr = formatDateInZone();
   log.debug(`Checking for updates, today is ${todayStr} ...`);
   try {
-    const response = await axios.get(yasnoApiUrl);
-    payloadChecksum = calculateChecksum(response.data);
-    if (payloadChecksum && payloadChecksum === lastYasnoChecksum) {
-      log.debug('Yasno payload unchanged (checksum match), skipping processing.');
-      return;
+    try {
+      const response = await axios.get(yasnoApiUrl);
+      payloadChecksum = calculateChecksum(response.data);
+      if (!force && payloadChecksum && payloadChecksum === lastYasnoChecksum) {
+        log.debug('Yasno payload unchanged (checksum match), skipping processing.');
+        return { changed: false, skipped: false, error: null };
+      }
+      if (response.data && typeof response.data === 'object' && settings.setYasnoGroupIds(Object.keys(response.data))) {
+        log.info(`Yasno group list updated: ${settings.getYasnoGroupIds().length} groups (${settings.getYasnoGroupIds().join(', ')})`);
+      }
+      currentData = transformPlannedOutages(response.data, todayStr);
+      if (!currentData) {
+        throw new Error('Unable to process planned outage payload.');
+      }
+      runtime.lastSchedule = buildScheduleSnapshot(currentData, todayStr);
+    } catch (error) {
+      log.error('Error fetching planned outage data:', error);
+      runtime.lastError = String(error?.message || error);
+      return { changed: false, skipped: false, error: runtime.lastError };
     }
-    currentData = transformPlannedOutages(response.data, todayStr);
-    if (!currentData) {
-      log.error('Unable to process planned outage payload.');
-      return;
-    }
-  } catch (error) {
-    log.error('Error fetching planned outage data:', error);
-    return;
-  }
 
-  if (!currentData || !currentData.intervals) {
-    log.error('No valid intervals found in processed data.');
-    return;
-  }
-
-  try {
-    await processScheduleUpdate(currentData, todayStr);
-    if (payloadChecksum) {
-      lastYasnoChecksum = payloadChecksum;
+    if (!currentData || !currentData.intervals) {
+      log.error('No valid intervals found in processed data.');
+      runtime.lastError = 'No valid intervals found in processed data.';
+      return { changed: false, skipped: false, error: runtime.lastError };
     }
-  } catch (error) {
-    log.error('Failed to process planned outage update:', error?.stack || error);
+
+    try {
+      const changed = await processScheduleUpdate(currentData, todayStr);
+      if (payloadChecksum) {
+        lastYasnoChecksum = payloadChecksum;
+      }
+      if (changed) {
+        runtime.lastChangeAt = Date.now();
+      }
+      runtime.lastError = null;
+      return { changed, skipped: false, error: null };
+    } catch (error) {
+      log.error('Failed to process planned outage update:', error?.stack || error);
+      runtime.lastError = String(error?.message || error);
+      return { changed: false, skipped: false, error: runtime.lastError };
+    }
+  } finally {
+    runtime.checkInProgress = false;
   }
+}
+
+function buildScheduleSnapshot(currentData, todayStr) {
+  const snapshot = {
+    fetchedAt: Date.now(),
+    todayStr,
+    tomorrowStr: formatDateInZone(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+    groups: {},
+  };
+  for (const group of Object.keys(currentData.intervals)) {
+    const days = {};
+    for (const dayStr of Object.keys(currentData.intervals[group])) {
+      days[dayStr] = {
+        status: currentData.statuses?.[group]?.[dayStr] ?? null,
+        intervals: currentData.intervals[group][dayStr],
+      };
+    }
+    snapshot.groups[group] = {
+      updatedOn: currentData.groupUpdates[group] ? new Date(currentData.groupUpdates[group]).toISOString() : null,
+      days,
+    };
+  }
+  return snapshot;
 }
 
 function transformPlannedOutages(payload, todayStr) {
@@ -227,12 +281,13 @@ function transformPlannedOutages(payload, todayStr) {
   const groupUpdates = {};
   const statuses = {};
   const relevantGroups = groups.length > 0 ? groups : Object.keys(payload);
+  const knownYasnoStatuses = settings.getKnownYasnoStatuses();
 
   for (const group of relevantGroups) {
     const groupData = payload[group];
     if (!groupData) {
       log.warn(`No planned outage data returned for group ${group}`);
-      intervals[group] = { todayStr: [] };
+      intervals[group] = { [todayStr]: [] };
       groupUpdates[group] = new Date();
       statuses[group] = {};
       continue;
@@ -252,7 +307,6 @@ function transformPlannedOutages(payload, todayStr) {
     log.debug(`Processing planned outages for group ${group} on keys: ${Object.keys(groupData).join(', ')} ...`);
 
     for (const dayKey of Object.keys(groupData)) {
-
       const dayData = groupData[dayKey];
       if (!dayData || !Array.isArray(dayData.slots)) {
         continue;
@@ -271,17 +325,17 @@ function transformPlannedOutages(payload, todayStr) {
         log.warn(`Unable to format date string for group ${group} on ${dayKey}: ${dayData.date}`);
         continue;
       }
-      if (intervals[group].hasOwnProperty(dayDateStr)) {
+      if (Object.hasOwn(intervals[group], dayDateStr)) {
         log.debug(`Intervals for group ${group} on ${dayDateStr} already processed, skipping duplicate.`);
         continue;
       }
       intervals[group][dayDateStr] = [];
       log.debug(`Processing group ${group} for day ${dayKey} with date string ${dayDateStr} ...`);
 
-      if (!knownYasnoStatuses.hasOwnProperty(dayData.status)) {
+      if (!Object.hasOwn(knownYasnoStatuses, dayData.status)) {
         knownYasnoStatuses[dayData.status] = dayData;
         log.info(`New Yasno status encountered: ${dayData.status} for group ${group} on ${dayKey}. Added to known statuses.`);
-        cache.setItem(`knownYasnoStatuses`, knownYasnoStatuses);
+        settings.addKnownYasnoStatus(dayData.status, dayData);
       }
       const currentStatus = String(dayData.status || '').toLowerCase();
       statuses[group][dayDateStr] = currentStatus;
@@ -303,16 +357,16 @@ function transformPlannedOutages(payload, todayStr) {
   return {
     intervals,
     groupUpdates,
-    statuses
+    statuses,
   };
 }
 
-function formatDateInZone(date = new Date(), timeZone = "Europe/Kiev") {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone
+function formatDateInZone(date = new Date(), zone = timeZone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: zone,
   });
   return formatter.format(date); // "YYYY-MM-DD"
 }
@@ -352,9 +406,8 @@ function buildIntervalsFromSlots(slots) {
   return mergedIntervals;
 }
 
-
 function parseDateStringAsLocal(dateStr) {
-  const [y, m, d] = dateStr.split("-").map(Number);
+  const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(y, m - 1, d, 0, 0, 0, 0);
 }
 
@@ -394,7 +447,7 @@ function formatUpdatedOn(timestamp) {
   return new Intl.DateTimeFormat('uk-UA', {
     timeZone: timeZone,
     dateStyle: 'short',
-    timeStyle: 'short'
+    timeStyle: 'short',
   }).format(date);
 }
 
@@ -422,12 +475,30 @@ function buildEmptyWeeklyArray() {
 
 function serializeWeeklyArray(weekly) {
   // Same format used by timetable editor: concatenate 24 digits per day and end day with ';'
-  return weekly.map((row) => row.map((v) => {
-    const n = parseInt(v);
-    if (!Number.isFinite(n) || n < 0) return 0;
-    if (n > 3) return 3;
-    return n;
-  }).join('')).join(';') + ';';
+  return (
+    weekly
+      .map((row) =>
+        row
+          .map((v) => {
+            const n = parseInt(v);
+            if (!Number.isFinite(n) || n < 0) return 0;
+            if (n > 3) return 3;
+            return n;
+          })
+          .join(''),
+      )
+      .join(';') + ';'
+  );
+}
+
+function halfHourState(first, second) {
+  if (first && second) {
+    return 1;
+  }
+  if (first) {
+    return 2;
+  }
+  return second ? 3 : 0;
 }
 
 function intervalsToDayStates(intervals) {
@@ -452,7 +523,7 @@ function intervalsToDayStates(intervals) {
       if (first && second) break;
     }
 
-    states[h] = (first && second) ? 1 : (first ? 2 : (second ? 3 : 0));
+    states[h] = halfHourState(first, second);
   }
   return states;
 }
@@ -490,13 +561,9 @@ async function postExternalTimetableWeekly(svitlobotChannelId, weekly) {
 }
 
 async function reflectExternalTimetable(group, dayStr, todayStr, intervals) {
-  const svitlobotChannelIds = cache.getItem(`svitlobotChannelIdGroup${group}`, 'string');
-  if (svitlobotChannelIds === null || svitlobotChannelIds.length === undefined) return;
-
-  const svitlobotChannelIdsArray = svitlobotChannelIds.split(',').map((id) => id.trim()).filter((id) => id.length > 0);
-  for (const svitlobotChannelId of svitlobotChannelIdsArray) {
+  const svitlobotChannelIds = settings.getGroup(group)?.svitlobotChannelIds || [];
+  for (const svitlobotChannelId of svitlobotChannelIds) {
     try {
-
       let weekly;
       try {
         weekly = await fetchExternalTimetableWeekly(svitlobotChannelId);
@@ -541,10 +608,14 @@ function clearCalendarEventsCache(calendarId, dayStr) {
   calendarEventsCache.delete(cacheKey);
 }
 
+/**
+ * @returns {Promise<boolean>} true when at least one group/day produced calendar changes.
+ */
 async function processScheduleUpdate(currentData, todayStr) {
   const groupUpdateTimes = currentData.groupUpdates || {};
   const groupStatuses = currentData.statuses || {};
-  for (const group of groups) {
+  let changed = false;
+  for (const group of [...groups]) {
     const currentGroupData = currentData.intervals[group] || {};
     const updateTime = groupUpdateTimes[group];
     if (!updateTime) {
@@ -559,9 +630,12 @@ async function processScheduleUpdate(currentData, todayStr) {
       const currentIntervals = currentGroupData[dateKey];
       const currentStatus = groupStatuses?.[group]?.[dateKey] || null;
       log.info(`Going to check schedule for group ${group} on ${dateKey} updated on ${updateTime}.`);
-      await calendarUpdate(group, currentIntervals, dateKey, todayStr, updateTime, currentStatus);
+      if (await calendarUpdate(group, currentIntervals, dateKey, todayStr, updateTime, currentStatus)) {
+        changed = true;
+      }
     }
-  };
+  }
+  return changed;
 }
 
 async function readPrivateKey() {
@@ -585,14 +659,12 @@ async function authenticateToCalendar(key) {
   return cachedCalendarAuth;
 }
 
-
 function getCalendarService() {
   if (!cachedCalendarService) {
     cachedCalendarService = google.calendar('v3');
   }
   return cachedCalendarService;
 }
-
 
 async function getCalendarEvents(calendar, auth, calendarId, today, todayStr) {
   try {
@@ -608,32 +680,31 @@ async function getCalendarEvents(calendar, auth, calendarId, today, todayStr) {
       calendarId: calendarId,
       timeMin: startOfDay,
       timeMax: endOfDay,
-      timeZone: timeZone
+      timeZone: timeZone,
     });
     const items = response.data.items;
     setCalendarEventsCache(calendarId, todayStr, items);
     return items;
   } catch (error) {
-    console.error('Error fetching calendar events:', error);
+    log.error('Error fetching calendar events:', error);
     throw error;
   }
 }
 
-
 function prepareCalendarEvent(group, today, interval, updatedOn) {
-  const timestamp = formatTz(updatedOn, "dd.MM.yyyy HH:mm", { timeZone });
+  const timestamp = formatTz(updatedOn, 'dd.MM.yyyy HH:mm', { timeZone });
   return {
     summary: template(calendarEventSummary, { group }),
     description: template(calendarEventDescription, { timestamp, url: yasnoMainUrl }),
     start: {
       dateTime: formatDateTimeForMinutes(today, interval.startMinutes),
-      timeZone: timeZone
+      timeZone: timeZone,
     },
     end: {
       dateTime: formatDateTimeForMinutes(today, interval.endMinutes),
-      timeZone: timeZone
-    }
-  }
+      timeZone: timeZone,
+    },
+  };
 }
 
 function prepareCalendarEvents(group, today, intervals, updatedOn) {
@@ -647,7 +718,8 @@ function prepareCalendarEvents(group, today, intervals, updatedOn) {
 function compareCalendarEvents(events, eventsNew) {
   const eventsToDelete = [];
   const eventsToAdd = [];
-  const eventsAreEqual = (eventA, eventB) => eventA.start.dateTime === eventB.start.dateTime && eventA.end.dateTime === eventB.end.dateTime && eventA.summary === eventB.summary;
+  const eventsAreEqual = (eventA, eventB) =>
+    eventA.start.dateTime === eventB.start.dateTime && eventA.end.dateTime === eventB.end.dateTime && eventA.summary === eventB.summary;
   for (const event of events) {
     const found = eventsNew.find((eventNew) => eventsAreEqual(event, eventNew));
     if (!found) {
@@ -672,10 +744,10 @@ async function calendarEventsDelete(calendar, auth, calendarId, events, dayStr) 
       await calendar.events.delete({
         auth: auth,
         calendarId: calendarId,
-        eventId: event.id
+        eventId: event.id,
       });
     } catch (error) {
-      console.error('Error deleting calendar event:', error);
+      log.error('Error deleting calendar event:', error);
       throw error;
     }
   }
@@ -691,21 +763,20 @@ async function calendarEventsAdd(calendar, auth, calendarId, events, dayStr) {
       await calendar.events.insert({
         auth: auth,
         calendarId: calendarId,
-        requestBody: event
+        requestBody: event,
       });
     } catch (error) {
-      console.error('Error adding calendar event:', error);
+      log.error('Error adding calendar event:', error);
       throw error;
     }
   }
   clearCalendarEventsCache(calendarId, dayStr);
 }
 
-
 async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedOn, dayStatus) {
-  log.debug(`Sending message for group ${group} for day ${dayStr}. Today is ${todayStr}.`)
+  log.debug(`Sending message for group ${group} for day ${dayStr}. Today is ${todayStr}.`);
   const textForData = todayStr === dayStr ? textToday : textTomorrow;
-  const [y, m, d] = dayStr.split("-").map(Number);
+  const [y, m, d] = dayStr.split('-').map(Number);
   const newDayStr = `${d.toString().padStart(2, '0')}.${m.toString().padStart(2, '0')}.${y}`;
   let message = template(textScheduleUpdated, { today: textForData, date: newDayStr }) + ':';
   let sendingNeeded = true;
@@ -724,8 +795,7 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
         return;
       }
       sendingNeeded = true;
-      message += `\n${template(textScheduleOutageDefiniteLine, { start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16) })
-        }`;
+      message += `\n${template(textScheduleOutageDefiniteLine, { start: event.start.dateTime.slice(11, 16), end: event.end.dateTime.slice(11, 16) })}`;
     });
   }
   if (!sendingNeeded) {
@@ -735,442 +805,550 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
   if (updatedOn) {
     message += `\n${template(textScheduleUpdatedAt, { timestamp: formatUpdatedOn(updatedOn) })}`;
   }
-  const targetTitle = telegramTargetTitles[group];
-  if (targetTitle !== undefined) {
+  const targets = settings.listTargets(group).filter((target) => target.enabled);
+  if (targets.length === 0) {
+    log.debug(`Telegram is not configured for group ${group}`);
+    return;
+  }
+  for (const target of targets) {
+    const key = target.key;
+    const info = telegramTargetRuntime.get(key);
+    if (!info || info.error) {
+      const reason = info?.error ? `: ${info.error}` : '';
+      log.warn(`Telegram target ${key} for group ${group} is not available, message skipped${reason}`);
+      continue;
+    }
     try {
-      const messageId = await telegramSendMessage(group, message);
-      if (messageId !== null) {
-        const cacheIdLastMessageId = `lastMessageIdGroup${group}`;
-        const previousMessageId = cache.getItem(cacheIdLastMessageId, 'number');
-        cache.setItem(cacheIdLastMessageId, messageId);
-        if (options.pinMessage) {
+      const messageId = await telegramSendMessage(target, info, message);
+      const previousMessageId = settings.getLastMessageId(group, key);
+      settings.setLastMessageId(group, key, messageId);
+      if (!options.pinMessage) {
+        continue;
+      }
+      try {
+        await telegramPinMessage(target, info, messageId);
+        log.debug(`Telegram message ${messageId} for group ${group} pinned in "${info.title}" (${key})`);
+        if (options.unpinPrevious && previousMessageId !== undefined && previousMessageId !== null) {
           try {
-            await telegramPinMessage(group, messageId)
-            log.debug(`Telegram message for group ${group} with id: ${messageId} pinned to "${targetTitle}" with topic ${telegramTopicId}`);
-            if (options.unpinPrevious) {
-              if (previousMessageId !== undefined && previousMessageId !== null) {
-                try {
-                  await telegramUnpinMessage(group, previousMessageId);
-                  log.debug(
-                    `Telegram message for group ${group} with id: ${previousMessageId} unpinned from "${targetTitle}" with topic ${telegramTopicId}`,
-                  );
-                } catch (error) {
-                  log.error(`Error unpinning Telegram message for group ${group} in "${targetTitle}": ${error}`);
-                }
-              }
-            }
+            await telegramUnpinMessage(target, info, previousMessageId);
+            log.debug(`Telegram message ${previousMessageId} for group ${group} unpinned in "${info.title}" (${key})`);
           } catch (error) {
-            log.error(`Error pinning Telegram message for group ${group} in "${targetTitle}": ${error}`);
+            log.error(`Error unpinning Telegram message for group ${group} in "${info.title}": ${error}`);
           }
         }
+      } catch (error) {
+        log.error(`Error pinning Telegram message for group ${group} in "${info.title}": ${error}`);
       }
     } catch (error) {
-      log.error(`Error sending Telegram message for group ${group} to "${targetTitle}": ${error}`);
+      log.error(`Error sending Telegram message for group ${group} to "${info.title}" (${key}): ${error}`);
     }
-  } else {
-    log.debug(`Telegram is not configured for group ${group}`);
   }
 }
 
+/**
+ * @returns {Promise<boolean>} true when calendar events were changed.
+ */
 async function calendarUpdate(group, intervals, dayStr, todayStr, updatedOn, dayStatus) {
   const eventsNew = prepareCalendarEvents(group, dayStr, intervals, updatedOn);
   log.debug('Events new:', stringify(eventsNew));
   const key = await readPrivateKey();
   const auth = await authenticateToCalendar(key);
   const calendar = getCalendarService();
-  const calendarId = cache.getItem(`calendarIdGroup${group}`);
+  const calendarId = settings.getGroup(group)?.calendarId;
+  if (!calendarId) {
+    log.warn(`Group ${group} has no calendar configured, skipping.`);
+    return false;
+  }
   const day = parseDateStringAsLocal(dayStr);
   const events = await getCalendarEvents(calendar, auth, calendarId, day, dayStr);
   log.debug('Events:', stringify(events));
   const { eventsToDelete, eventsToAdd } = compareCalendarEvents(events, eventsNew);
   log.debug('Events: to delete:', stringify(eventsToDelete), ', to add:', stringify(eventsToAdd));
-  if (eventsToDelete.length > 0 || eventsToAdd.length > 0) {
-    if (eventsToDelete.length > 0) {
-      await calendarEventsDelete(calendar, auth, calendarId, eventsToDelete, dayStr);
-    }
-    if (eventsToAdd.length > 0) {
-      await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd, dayStr);
-    }
-    await telegramSendUpdate(group, todayStr, dayStr, eventsNew, updatedOn, dayStatus);
-    // Reflect changes on external weekly timetable site for subgroup 1.1
-    await reflectExternalTimetable(group, dayStr, todayStr, intervals);
+  if (eventsToDelete.length === 0 && eventsToAdd.length === 0) {
+    return false;
+  }
+  if (eventsToDelete.length > 0) {
+    await calendarEventsDelete(calendar, auth, calendarId, eventsToDelete, dayStr);
+  }
+  if (eventsToAdd.length > 0) {
+    await calendarEventsAdd(calendar, auth, calendarId, eventsToAdd, dayStr);
+  }
+  await telegramSendUpdate(group, todayStr, dayStr, eventsNew, updatedOn, dayStatus);
+  // Reflect changes on the external weekly timetable site (svitlobot)
+  await reflectExternalTimetable(group, dayStr, todayStr, intervals);
+  return true;
+}
+
+// -------- Telegram clients --------
+
+async function askQuestion(question) {
+  const rl = readline.createInterface({ input, output });
+  try {
+    return await rl.question(question);
+  } finally {
+    rl.close();
   }
 }
 
-function getAPIAttributes() {
-  return new Promise((resolve, reject) => {
-    const apiId = cache.getItem('telegramApiId', 'number');
-    const apiHash = cache.getItem('telegramApiHash', 'string');
-    if (typeof apiId !== 'number' || apiId <= 0 || typeof apiHash !== 'string' || apiHash.length < 1) {
-      const rl = readline.createInterface({
-        input,
-        output,
-      });
-      rl.question('Enter your API ID: ')
-        .then((id) => {
-          const newApiId = parseInt(id);
-          cache.setItem('telegramApiId', newApiId);
-          rl.question('Enter your API Hash: ')
-            .then((hash) => {
-              cache.setItem('telegramApiHash', hash);
-              rl.close();
-              resolve({ apiID: newApiId, hash });
-            })
-            .catch((error) => {
-              log.error(`Error: ${error}`);
-              rl.close();
-              reject(error);
-            });
-        })
-        .catch((error) => {
-          log.error(`Error: ${error}`);
-          rl.close();
-          reject(error);
-        });
-    } else {
-      resolve({ apiId, apiHash });
-    }
-  });
+async function getAPIAttributes() {
+  const stored = settings.getApiCredentials();
+  if (stored !== null) {
+    return stored;
+  }
+  const apiId = parseInt(await askQuestion('Enter your API ID: '), 10);
+  const apiHash = (await askQuestion('Enter your API Hash: ')).trim();
+  if (!Number.isInteger(apiId) || apiId <= 0 || apiHash.length === 0) {
+    throw new Error('Invalid API ID or API Hash');
+  }
+  settings.setApiCredentials({ apiId, apiHash });
+  return { apiId, apiHash };
 }
 
-function getBotAuthToken() {
-  return new Promise((resolve, reject) => {
-    const botAuthToken = cache.getItem('telegramBotAuthToken');
-    if (typeof botAuthToken !== 'string' || botAuthToken.length < botAuthTokenMinimumLength) {
-      const rl = readline.createInterface({
-        input,
-        output,
-      });
-      rl.question('Enter your Bot Auth Token: ')
-        .then((token) => {
-          cache.setItem('telegramBotAuthToken', token);
-          rl.close();
-          resolve(token);
-        })
-        .catch((error) => {
-          log.error(`Error: ${error}`);
-          rl.close();
-          reject(error);
-        });
-    } else {
-      resolve(botAuthToken);
-    }
-  });
+async function getBotAuthToken() {
+  const stored = settings.getBotToken();
+  if (stored !== null) {
+    return stored;
+  }
+  const token = (await askQuestion('Enter your Bot Auth Token: ')).trim();
+  if (token.length < BOT_TOKEN_MIN_LENGTH) {
+    throw new Error('Invalid Bot Auth Token');
+  }
+  settings.setBotToken(token);
+  return token;
 }
 
-function getTelegramClient() {
-  return new Promise((resolve, reject) => {
-    if (options.asUser === true) {
-      const storeSession = new StoreSession(`data/session`);
-      if (typeof process.env.TELEGRAM_API_ID === 'string' && process.env.TELEGRAM_API_ID.length > 0) {
-        cache.setItem('telegramApiId', parseInt(process.env.TELEGRAM_API_ID));
-      }
-      if (typeof process.env.TELEGRAM_API_HASH === 'string' && process.env.TELEGRAM_API_HASH.length > 0) {
-        cache.setItem('telegramApiHash', process.env.TELEGRAM_API_HASH);
-      }
-      getAPIAttributes()
-        .then(({ apiId, apiHash }) => {
-          const client = new TelegramClient(storeSession, apiId, apiHash, {
-            connectionRetries: 5,
-            useWSS: true,
-            connectionTimeout: 10000,
-            appVersion: `${scriptName} v${scriptVersion}`,
-          });
-          const rl = readline.createInterface({
-            input,
-            output,
-          });
-          client
-            .start({
-              phoneNumber: async () => {
-                return rl.question('Enter your phone number: ');
-              },
-              phoneCode: async () => {
-                return rl.question('Enter the code sent to your phone: ');
-              },
-              password: async () => {
-                return rl.question('Enter your password: ');
-              },
-              onError: (error) => {
-                log.error(`Telegram client error: ${error}`);
-              },
-            })
-            .then(() => {
-              rl.close();
-              log.debug('Telegram client is connected');
-              client.setParseMode(telegramParseMode);
-              resolve(client);
-            })
-            .catch((error) => {
-              rl.close();
-              log.error(`Telegram client connection error: ${error}`);
-              reject(error);
-            });
-        })
-        .catch((error) => {
-          log.error(`API attributes error: ${error}!`);
-          reject(error);
-        });
-    } else {
-      if (
-        typeof process.env.TELEGRAM_BOT_AUTH_TOKEN === 'string' &&
-        process.env.TELEGRAM_BOT_AUTH_TOKEN.length >= botAuthTokenMinimumLength
-      ) {
-        cache.setItem('telegramBotAuthToken', process.env.TELEGRAM_BOT_AUTH_TOKEN);
-      }
-      getBotAuthToken()
-        .then((token) => {
-          const client = new GrammyApi(token);
-          resolve(client);
-        })
-        .catch((error) => {
-          log.error(`Bot Auth Token error: ${error}`);
-          reject(error);
-        });
-    }
+async function getUserClient() {
+  const storeSession = new StoreSession(sessionDir);
+  const { apiId, apiHash } = await getAPIAttributes();
+  const client = new TelegramClient(storeSession, apiId, apiHash, {
+    connectionRetries: 5,
+    useWSS: true,
+    connectionTimeout: 10000,
+    appVersion: `${scriptName} v${scriptVersion}`,
   });
+  await client.start({
+    phoneNumber: async () => askQuestion('Enter your phone number: '),
+    phoneCode: async () => askQuestion('Enter the code sent to your phone: '),
+    password: async () => askQuestion('Enter your password: '),
+    onError: (error) => {
+      log.error(`Telegram client error: ${error}`);
+    },
+  });
+  log.debug('Telegram client is connected');
+  client.setParseMode(telegramParseMode);
+  return client;
 }
 
-function getTelegramTargetEntity(group) {
-  return new Promise((resolve, reject) => {
-    const telegramChatId = cache.getItem(`telegramChatIdGroup${group}`, 'number');
-    const telegramTopicId = cache.getItem(`telegramTopicIdGroup${group}`, 'number');
-    if (typeof telegramChatId !== 'number' || telegramChatId == 0) {
-      log.warn(`Telegram chat ID for group ${group} is not valid! No notification will be sent!`);
-      resolve();
-    } else {
-      if (options.asUser === false) {
-        telegramClient
-          .getChat(telegramChatId)
-          .then((entity) => {
-            telegramTargetTitles[group] = entity.title || `${entity.first_name || ''} ${entity.last_name || ''} (${entity.username || ''})`;
-            log.debug(`Telegram chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
-            telegramTargetEntities[group] = entity;
-            resolve();
-          })
-          .catch((error) => {
-            log.warn(`Telegram chat with ID ${telegramChatId} not found! Error: ${error}`);
-            reject(error);
-          });
-      } else {
-        telegramClient
-          .getDialogs()
-          .then((dialogs) => {
-            let chatId = telegramChatId > 0 ? telegramChatId : -telegramChatId;
-            if (chatId > 1000000000000) {
-              chatId = chatId - 1000000000000;
-            }
-            const availableDialogs = dialogs.filter(
-              (dialog) => dialog.entity?.migratedTo === undefined || dialog.entity?.migratedTo === null,
-            ),
-              targetDialog = availableDialogs.find((item) => `${chatId}` === `${item.entity.id}`);
-            if (targetDialog !== undefined) {
-              telegramTargetTitles[group] =
-                targetDialog.entity.title ||
-                `${targetDialog.entity.firstName || ''} ${targetDialog.entity.lastName || ''} (${targetDialog.entity.username || ''})`;
-              if (telegramTopicId > 0) {
-                telegramClient
-                  .invoke(
-                    new Api.messages.GetForumTopics({
-                      peer: targetDialog.entity,
-                      q: "",
-                      limit: 100,
-                      offsetId: 0,
-                      offsetDate: 0,
-                      offsetTopic: 0,
-                    }),
-                  )
-                  .then((response) => {
-                    if (Array.isArray(response.topics) && response.topics.length > 0) {
-                      // eslint-disable-next-line sonarjs/no-nested-functions
-                      const targetTopic = response.topics.find((topic) => topic.id === telegramTopicId);
-                      if (targetTopic) {
-                        log.debug(`Telegram topic "${targetTopic.title}" in chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
-                        telegramTargetEntities[group] = targetDialog.entity;
-                        resolve();
-                      } else {
-                        log.warn(`Topic with id ${telegramTopicId} not found in "${telegramTargetTitles[group]}" (${telegramChatId})!`);
-                        reject(new Error(`Topic with id ${telegramTopicId} not found in "${telegramTargetTitles[group]}" (${telegramChatId})!`));
-                      }
-                    } else {
-                      log.warn(`No topics found in "${telegramTargetTitles[group]}" (${telegramChatId})!`);
-                      reject(new Error(`No topics found in "${telegramTargetTitles[group]}" (${telegramChatId})!`));
-                    }
-                  })
-                  .catch((error) => {
-                    reject(error);
-                  });
-              } else {
-                log.debug(`Telegram chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
-                telegramTargetEntities[group] = targetDialog.entity;
-                resolve();
-              }
-            } else {
-              reject(new Error(`Telegram chat with ID ${telegramChatId} not found`));
-            }
-          })
-          .catch((error) => {
-            reject(error);
-          });
-      }
-    }
-  });
+async function getTelegramClient() {
+  if (options.asUser === true) {
+    return getUserClient();
+  }
+  const token = await getBotAuthToken();
+  telegramBot = new Bot(token);
+  return telegramBot.api;
 }
 
-function telegramSendMessage(group, messageText) {
-  return new Promise((resolve, reject) => {
-    if (telegramClient !== null && telegramTargetEntities[group] !== undefined) {
-      let telegramMessage;
-      let telegramTarget;
-      let messageOptions;
-      const telegramTargetTitle = telegramTargetTitles[group];
-      const telegramTopicId = cache.getItem(`telegramTopicIdGroup${group}`, 'number') || 0;
-      if (options.asUser === true) {
-        telegramMessage = {
-          message: messageText,
-        };
-        if (telegramTopicId > 0) {
-          telegramMessage.replyTo = telegramTopicId;
-        }
-        telegramTarget = telegramTargetEntities[group];
-      } else {
-        telegramMessage = messageText;
-        telegramTarget = cache.getItem(`telegramChatIdGroup${group}`, 'number') || 0;;
-        messageOptions = {
-          parse_mode: telegramParseMode,
-        };
-        if (telegramTopicId > 0) {
-          messageOptions.message_thread_id = telegramTopicId;
-        }
-      }
-      telegramClient
-        .sendMessage(telegramTarget, telegramMessage, messageOptions)
-        .then((message) => {
-          const messageId = options.asUser === true ? message.id : message.message_id;
-          log.debug(`Telegram message sent to "${telegramTargetTitle}" with topic ${telegramTopicId} with messageId: ${messageId}`);
-          resolve(messageId);
-        })
-        .catch((error) => {
-          reject(error);
-        });
-    } else {
-      reject(new Error('Telegram client is not ready!'));
-    }
-  });
+function dialogChatType(dialog) {
+  if (dialog.isUser === true) {
+    return dialog.entity?.bot === true ? 'bot' : 'user';
+  }
+  if (dialog.isChannel === true && dialog.isGroup !== true) {
+    return 'channel';
+  }
+  return 'group';
 }
 
-function telegramPinMessage(group, messageId) {
-  return new Promise((resolve, reject) => {
-    const target = telegramTargetEntities[group];
-    if (telegramClient !== null && target !== undefined) {
-      if (options.asUser === true) {
-        telegramClient
-          .pinMessage(target, messageId)
-          .then(() => {
-            resolve();
-          })
-          .catch((error) => {
-            reject(error);
-          });
-      } else {
-        telegramClient
-          .pinChatMessage(target, messageId)
-          .then(() => {
-            resolve();
-          })
-          .catch((error) => {
-            reject(error);
-          });
-      }
-    } else {
-      reject(new Error('Telegram client is not ready!'));
-    }
-  });
+function normalizeDialogId(chatId) {
+  let id = chatId > 0 ? chatId : -chatId;
+  if (id > 1000000000000) {
+    id = id - 1000000000000;
+  }
+  return `${id}`;
 }
 
-function telegramUnpinMessage(group, messageId) {
-  return new Promise((resolve, reject) => {
-    const target = telegramTargetEntities[group];
-    if (telegramClient !== null && target !== undefined) {
-      if (options.asUser === true) {
-        telegramClient
-          .unpinMessage(target, messageId)
-          .then(() => {
-            resolve();
-          })
-          .catch((error) => {
-            reject(error);
-          });
-      } else {
-        telegramClient
-          .unpinChatMessage(target, messageId)
-          .then(() => {
-            resolve();
-          })
-          .catch((error) => {
-            reject(error);
-          });
-      }
-    } else {
-      reject(new Error('Telegram client is not ready!'));
-    }
-  });
+/** User mode only: cached dialog list of the account. */
+async function getDialogs(force = false) {
+  if (options.asUser !== true || telegramClient === null) {
+    return [];
+  }
+  if (!force && dialogsCache.items.length > 0 && Date.now() - dialogsCache.at < dialogsCacheTtlMs) {
+    return dialogsCache.items;
+  }
+  const dialogs = await telegramClient.getDialogs();
+  dialogsCache = {
+    items: dialogs.filter((dialog) => dialog.entity && (dialog.entity.migratedTo === undefined || dialog.entity.migratedTo === null)),
+    at: Date.now(),
+  };
+  return dialogsCache.items;
 }
 
-function gracefulExit() {
-  if (telegramClient !== null && options.asUser === true && telegramClient.connected === true) {
-    telegramClient
-      .disconnect()
-      .then(() => {
-        log.info(`Telegram client is disconnected!`);
-        telegramClient
-          .destroy()
-          .then(() => {
-            log.info(`Telegram client is destroyed!`);
-            telegramClient = null;
-            exit(0);
-          })
-          .catch((error) => {
-            log.error(`Telegram client - nothing to destroy!`);
-            exit(0);
-          });
-      })
-      .catch((error) => {
-        log.error(`Telegram client is not connected!`);
-        exit(0);
-      });
-  } else if (telegramClient !== null && options.user === false) {
-    try {
-      telegramClient.stop();
-      log.info(`Telegram bot is stopped!`);
-      // eslint-disable-next-line sonarjs/no-ignored-exceptions
-    } catch (error) {
-      log.info(`Telegram bot is stopped!`);
+function dialogTitle(entity) {
+  return entity.title || `${entity.firstName || ''} ${entity.lastName || ''} (${entity.username || ''})`.trim();
+}
+
+/** User mode only: chats of the account, optionally filtered by target type. */
+async function listDialogs(type = null, force = false) {
+  if (options.asUser !== true) {
+    return null;
+  }
+  const dialogs = await getDialogs(force);
+  const items = [];
+  for (const dialog of dialogs) {
+    const chatType = dialogChatType(dialog);
+    const isForum = dialog.entity?.forum === true;
+    const matches = type === null || type === chatType || (type === 'topic' && isForum);
+    if (!matches) {
+      continue;
     }
-    exit(0);
+    items.push({ chatId: Number(telegramChatIdForDialog(dialog)), title: dialogTitle(dialog.entity), type: chatType, isForum });
+  }
+  return items;
+}
+
+/** Bot API style chat id for a teleproto dialog (-100<id> for channels/supergroups, -<id> for groups). */
+function telegramChatIdForDialog(dialog) {
+  const id = Number(dialog.entity.id);
+  if (dialog.isUser === true) {
+    return id;
+  }
+  if (dialog.isChannel === true) {
+    return -(1000000000000 + id);
+  }
+  return -id;
+}
+
+async function getForumTopics(entity) {
+  const response = await telegramClient.invoke(
+    new Api.messages.GetForumTopics({ peer: entity, q: '', limit: 100, offsetId: 0, offsetDate: 0, offsetTopic: 0 }),
+  );
+  return Array.isArray(response.topics) ? response.topics : [];
+}
+
+/** User mode only: topics of a forum chat. */
+async function listTopics(chatId) {
+  if (options.asUser !== true) {
+    return null;
+  }
+  const dialogs = await getDialogs();
+  const dialog = dialogs.find((item) => `${item.entity.id}` === normalizeDialogId(chatId));
+  if (!dialog) {
+    throw new Error(`Telegram chat with ID ${chatId} not found`);
+  }
+  if (dialog.entity?.forum !== true) {
+    return [];
+  }
+  const topics = await getForumTopics(dialog.entity);
+  return topics.map((topic) => ({ topicId: topic.id, title: topic.title }));
+}
+
+async function resolveTargetAsBot(target) {
+  const entity = await telegramClient.getChat(target.chatId);
+  const title = entity.title || `${entity.first_name || ''} ${entity.last_name || ''} (${entity.username || ''})`.trim();
+  let chatType = entity.type === 'private' ? 'user' : entity.type;
+  if (chatType === 'supergroup') {
+    chatType = 'group';
+  }
+  if (target.topicId !== null && entity.is_forum !== true) {
+    log.warn(`Telegram chat "${title}" (${target.chatId}) is not a forum, topic ${target.topicId} may be ignored`);
+  }
+  return { title, entity, chatType, error: null };
+}
+
+async function resolveTargetAsUser(target) {
+  const dialogs = await getDialogs();
+  const dialog = dialogs.find((item) => `${item.entity.id}` === normalizeDialogId(target.chatId));
+  if (dialog === undefined) {
+    throw new Error(`Telegram chat with ID ${target.chatId} not found`);
+  }
+  const title = dialogTitle(dialog.entity);
+  if (target.topicId !== null) {
+    const topics = await getForumTopics(dialog.entity);
+    if (topics.length === 0) {
+      throw new Error(`No topics found in "${title}" (${target.chatId})`);
+    }
+    if (!topics.some((topic) => topic.id === target.topicId)) {
+      throw new Error(`Topic with id ${target.topicId} not found in "${title}" (${target.chatId})`);
+    }
+  }
+  return { title, entity: dialog.entity, chatType: dialogChatType(dialog), error: null };
+}
+
+/**
+ * Resolve one target and remember the result for sending and for /status.
+ * @returns {Promise<object|null>} runtime info, or null when disabled or unavailable.
+ */
+async function resolveTarget(target) {
+  const key = targetKey(target);
+  telegramTargetRuntime.delete(key);
+  if (!target.enabled) {
+    return null;
+  }
+  try {
+    const info = options.asUser === true ? await resolveTargetAsUser(target) : await resolveTargetAsBot(target);
+    telegramTargetRuntime.set(key, info);
+    log.debug(`Telegram target "${info.title}" (${key}) resolved as ${info.chatType}`);
+    return info;
+  } catch (error) {
+    const message = String(error?.message || error);
+    telegramTargetRuntime.set(key, { title: null, entity: null, chatType: null, error: message });
+    log.warn(`Telegram target ${key} is not available: ${message}`);
+    return null;
+  }
+}
+
+async function resolveAllTargets() {
+  const targets = settings.listAllTargets();
+  for (const key of [...telegramTargetRuntime.keys()]) {
+    if (!targets.some((target) => target.key === key)) {
+      telegramTargetRuntime.delete(key);
+    }
+  }
+  for (const target of targets) {
+    await resolveTarget(target);
+  }
+  for (const group of groups) {
+    if (settings.listTargets(group).length === 0) {
+      log.warn(`No Telegram targets assigned to group ${group}! No notification will be sent!`);
+    }
+  }
+}
+
+async function telegramSendMessage(target, info, messageText) {
+  if (telegramClient === null) {
+    throw new Error('Telegram client is not ready!');
+  }
+  let message;
+  if (options.asUser === true) {
+    const telegramMessage = { message: messageText };
+    if (target.topicId !== null) {
+      telegramMessage.replyTo = target.topicId;
+    }
+    message = await telegramClient.sendMessage(info.entity, telegramMessage);
   } else {
-    log.info('All clients are disconnected!');
-    exit(0);
+    const messageOptions = { parse_mode: telegramParseMode };
+    if (target.topicId !== null) {
+      messageOptions.message_thread_id = target.topicId;
+    }
+    message = await telegramClient.sendMessage(target.chatId, messageText, messageOptions);
   }
+  const messageId = options.asUser === true ? message.id : message.message_id;
+  log.debug(`Telegram message sent to "${info.title}" (${targetKey(target)}) with messageId: ${messageId}`);
+  return messageId;
+}
+
+async function telegramPinMessage(target, info, messageId) {
+  if (options.asUser === true) {
+    await telegramClient.pinMessage(info.entity, messageId);
+  } else {
+    await telegramClient.pinChatMessage(target.chatId, messageId);
+  }
+}
+
+async function telegramUnpinMessage(target, info, messageId) {
+  if (options.asUser === true) {
+    await telegramClient.unpinMessage(info.entity, messageId);
+  } else {
+    await telegramClient.unpinChatMessage(target.chatId, messageId);
+  }
+}
+
+// -------- Management interface --------
+
+function withRuntime(target) {
+  const info = telegramTargetRuntime.get(target.key);
+  return {
+    ...target,
+    title: info?.title ?? null,
+    chatType: info?.chatType ?? null,
+    error: info?.error ?? null,
+    resolved: Boolean(info && !info.error),
+    groups: settings.groupsUsingTarget(target.key),
+  };
+}
+
+function buildGroupStatus(groupId) {
+  const group = settings.getGroup(groupId);
+  return {
+    id: groupId,
+    ...group,
+    telegramTargets: settings.listTargets(groupId).map(withRuntime),
+  };
+}
+
+const managementController = {
+  getAdminIds: () => settings.getAdminIds(),
+  addAdmin: (userId) => settings.setAdminIds([...settings.getAdminIds(), userId]),
+  removeAdmin: (userId) => {
+    const remaining = settings.getAdminIds().filter((id) => id !== userId);
+    if (remaining.length === 0) {
+      throw new Error('At least one admin must remain.');
+    }
+    settings.setAdminIds(remaining);
+  },
+  getStatus: () => ({
+    name: scriptName,
+    version: scriptVersion,
+    mode: options.asUser ? 'user' : 'bot',
+    language: options.language,
+    options: { ...options },
+    groups: settings.knownGroupIds().map(buildGroupStatus),
+    startedAt: runtime.startedAt,
+    lastCheckAt: runtime.lastCheckAt,
+    lastChangeAt: runtime.lastChangeAt,
+    lastError: runtime.lastError,
+    nextCheckAt: runtime.nextCheckAt,
+    checkInProgress: runtime.checkInProgress,
+    storagePath: settings.filePath,
+  }),
+  getGroup: (groupId) => buildGroupStatus(groupId),
+  getYasnoGroupIds: () => settings.getYasnoGroupIds(),
+  getSchedule: () => runtime.lastSchedule,
+  getKnownStatuses: () => settings.getKnownYasnoStatuses(),
+  forceCheck: () => checkForUpdates({ force: true }),
+  setGroupField: async (groupId, field, value) => {
+    settings.setGroupField(groupId, field, value);
+    refreshGroups();
+    lastYasnoChecksum = null; // make the next check re-evaluate the new configuration
+    return buildGroupStatus(groupId);
+  },
+  unsetGroupField: async (groupId, field) => {
+    settings.unsetGroupField(groupId, field);
+    refreshGroups();
+    lastYasnoChecksum = null;
+    return buildGroupStatus(groupId);
+  },
+  removeGroup: async (groupId) => {
+    settings.removeGroup(groupId);
+    refreshGroups();
+    lastYasnoChecksum = null;
+  },
+  getTargets: () => settings.listAllTargets().map(withRuntime),
+  getTarget: (key) => {
+    const target = settings.getTarget(key);
+    return target ? withRuntime(target) : null;
+  },
+  addTarget: async (input, groupId = null) => {
+    const target = groupId ? settings.addTargetToGroup(groupId, input) : settings.addTarget(input);
+    await resolveTarget(target);
+    return withRuntime(target);
+  },
+  updateTarget: async (key, patch) => {
+    const target = settings.updateTarget(key, patch);
+    await resolveTarget(target);
+    return withRuntime(target);
+  },
+  removeTarget: async (key) => {
+    const affected = settings.removeTarget(key);
+    telegramTargetRuntime.delete(key);
+    return affected;
+  },
+  assignTarget: async (groupId, key) => {
+    settings.assignTarget(groupId, key);
+    return buildGroupStatus(groupId);
+  },
+  unassignTarget: async (groupId, key) => {
+    settings.unassignTarget(groupId, key);
+    return buildGroupStatus(groupId);
+  },
+  listDialogs: (type, force) => listDialogs(type, force),
+  listTopics: (chatId) => listTopics(chatId),
+  setOption: async (name, value) => {
+    switch (name) {
+      case 'scheduleUpdateInterval': {
+        options.scheduleUpdateInterval = parseInterval(value);
+        scheduleChecks();
+        break;
+      }
+      case 'debug': {
+        options.debug = Boolean(value);
+        log.setLevel(options.debug ? 'debug' : 'info');
+        break;
+      }
+      case 'pinMessage':
+      case 'unpinPrevious':
+      case 'ignoreStatus': {
+        options[name] = Boolean(value);
+        if (name === 'ignoreStatus') {
+          lastYasnoChecksum = null;
+        }
+        break;
+      }
+      default:
+        throw new Error(`Unknown option: ${name}`);
+    }
+    settings.setOption(name, options[name]);
+    log.info(`Option ${name} set to ${options[name]} via management interface`);
+    return options[name];
+  },
+};
+
+async function startManagement() {
+  const adminIds = settings.getAdminIds();
+  if (adminIds.length === 0) {
+    log.info('Management interface disabled: no admin ids configured (set TELEGRAM_ADMIN_IDS or --admin-ids).');
+    return;
+  }
+  const managementToken = settings.getManagementBotToken();
+  if (managementToken !== null) {
+    managementBot = new Bot(managementToken);
+  } else if (telegramBot !== null) {
+    managementBot = telegramBot;
+  } else {
+    managementBot = new Bot(await getBotAuthToken());
+  }
+  management = createManagementBot({ bot: managementBot, controller: managementController, i18n, logger: log, timeZone });
+  await management.start();
+}
+
+// -------- Lifecycle --------
+
+let exiting = false;
+
+async function gracefulExit() {
+  if (exiting) {
+    return;
+  }
+  exiting = true;
+  if (checkTimer !== null) {
+    clearInterval(checkTimer);
+  }
+  try {
+    if (management !== null) {
+      await management.stop();
+      log.info('Management interface is stopped!');
+    }
+  } catch (error) {
+    log.error(`Error stopping management interface: ${error}`);
+  }
+  if (telegramClient !== null && options.asUser === true) {
+    try {
+      if (telegramClient.connected === true) {
+        await telegramClient.disconnect();
+        log.info('Telegram client is disconnected!');
+      }
+      await telegramClient.destroy();
+      log.info('Telegram client is destroyed!');
+    } catch (error) {
+      log.error(`Error while disconnecting Telegram client: ${error}`);
+    }
+  }
+  log.info('All clients are disconnected!');
+  exit(0);
 }
 
 process.on('SIGINT', gracefulExit);
 process.on('SIGTERM', gracefulExit);
 
-
-// Check for updates every 5 minutes
-setInterval(checkForUpdates, options.scheduleUpdateInterval * 60 * 1000);
-
 (async () => {
   try {
     telegramClient = await getTelegramClient();
-    for (const group of groups) {
-      await getTelegramTargetEntity(group);
-    }
+    await resolveAllTargets();
+    await startManagement();
+    scheduleChecks();
     // Initial check
     await checkForUpdates();
   } catch (error) {
-    log.error(`Error: ${error}`);
-    gracefulExit();
+    log.error(`Error: ${error?.stack || error}`);
+    await gracefulExit();
   }
 })();
