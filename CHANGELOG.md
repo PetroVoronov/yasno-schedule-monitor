@@ -1,5 +1,66 @@
 # Changelog
 
+## [1.0.0](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.11.1...v1.0.0) (2026-10-25)
+
+### ⚠ BREAKING CHANGES
+
+* **store:** configuration and state move from data/storage (one file per key) to data/config.json. The old directory is imported once on first start and can then be deleted. Stored values now take precedence over .env; a differing env value only logs a warning. The fixed group range 1.1-6.2 and --max-group-number are gone: group ids come from the Yasno API.
+
+### Features
+
+* **index:** post to every enabled target and expose dialog/topic pickers ([75f626d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/75f626d959c15e388c3f2ec25b48db97e00b0b88))
+* **management:** add Telegram management bot with BotFather-style menu ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+* **management:** target screens and /group target commands ([75f626d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/75f626d959c15e388c3f2ec25b48db97e00b0b88))
+* **management:** Targets section, assign picker and /target commands ([2b5d029](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/2b5d0290c9df059b1f08b855a316a6b2670fe7a8))
+* **settings:** allow multiple Telegram targets per group ([75f626d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/75f626d959c15e388c3f2ec25b48db97e00b0b88))
+* **settings:** configure Telegram targets once and assign them to groups ([2b5d029](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/2b5d0290c9df059b1f08b855a316a6b2670fe7a8))
+* **store:** replace node-localstorage with a single atomic JSON document ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+* **yasno:** take the group list from the Yasno API instead of a fixed 1.1-6.2 range ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+
+### Bug Fixes
+
+* **index:** bot-mode shutdown and pinning ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+
+### Code Refactoring
+
+* **index:** resolve targets once globally ([2b5d029](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/2b5d0290c9df059b1f08b855a316a6b2670fe7a8))
+* **index:** wire runtime around Settings and make it manageable at runtime ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+
+### Build System
+
+* **deps-dev:** bump @babel/core and @babel/eslint-parser to 8.0.7 ([621c162](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/621c162f61536128018249745eec8fbb6ae9fff7))
+* **deps-dev:** bump @babel/core and @babel/eslint-parser to 8.0.7 ([b83d85e](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/b83d85ee1c73de1212cd816143c845ac0bc8174d))
+* **deps-dev:** bump eslint-plugin-sonarjs to 3.0.7 and add ts-api-utils ([ffb1ee0](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/ffb1ee04f2f427a3f26b2a83ed52ae2a2a79c7c8))
+* **deps-dev:** bump eslint-plugin-sonarjs to 4.2.2 and markdownlint-cli2 to 0.24.0 ([a7682ec](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/a7682ec8adf068f8c90e1d365f4183f83d8d1532))
+* **deps-dev:** bump globals from 17.2.0 to 17.13.0 ([19219d8](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/19219d8db065a8c660c02114ce285524fe4f2a46))
+* **deps-dev:** bump globals from 17.2.0 to 17.13.0 ([32b8a6a](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/32b8a6a222fb44733ce5773d1e0b3815f7a72fb2))
+* **deps:** bump commander from 14.0.2 to 15.0.0 ([f0a7b8a](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/f0a7b8ae50a6a7860c24d02220d895a40c4405a7))
+* **deps:** bump commander from 14.0.2 to 15.0.0 ([21e8f08](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/21e8f08567c396101615cc089808d8782d2e2c55))
+* **deps:** bump googleapis from 170.1.0 to 187.0.0 ([645abd2](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/645abd22989ea484a5a917f6598bf2a835a8341c))
+* **deps:** bump googleapis from 170.1.0 to 187.0.0 ([879cf88](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/879cf88b49fc9833679cf0a08cb0cacc546dbe17))
+* **deps:** bump teleproto from 1.221.5 to 1.230.1 ([d28f01c](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/d28f01c8638e12b4471e11186d29b3ba880a7730))
+* **deps:** bump teleproto from 1.221.5 to 1.230.1 ([b606fa0](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/b606fa045bf66fcd72be82bc58fe0555435ca818))
+* **deps:** update dependencies and clear audit findings before 1.0.0 ([771ff19](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/771ff194ae5e1107d29d3b4079635885b32eaa97))
+* **deps:** update dependencies and clear production audit findings before 1.0.0 ([a7682ec](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/a7682ec8adf068f8c90e1d365f4183f83d8d1532))
+
+### Miscellaneous Chores
+
+* **i18n:** stop i18n from rewriting locale files at runtime ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+* **lint:** exclude data/ from eslint ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+
+### Documentation
+
+* describe shared Telegram targets ([2b5d029](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/2b5d0290c9df059b1f08b855a316a6b2670fe7a8))
+* describe Telegram targets ([75f626d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/75f626d959c15e388c3f2ec25b48db97e00b0b88))
+* document configuration, management bot and storage layout ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+* **readme:** minimum Node.js is 22.12 since commander 15 ([a7682ec](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/a7682ec8adf068f8c90e1d365f4183f83d8d1532))
+
+### Tests
+
+* add jest suites for Store, Settings and the management bot ([92383d1](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/92383d119fb4616be8c77462b8516c46fa41113a))
+* cover global targets and the assignment flows ([2b5d029](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/2b5d0290c9df059b1f08b855a316a6b2670fe7a8))
+* cover target model, v2 migration and target menu flows ([75f626d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/75f626d959c15e388c3f2ec25b48db97e00b0b88))
+
 ## [0.11.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v0.11.0...v0.11.1) (2026-01-29)
 
 ### Build System
