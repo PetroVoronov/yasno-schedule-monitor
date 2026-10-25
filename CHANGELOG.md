@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v1.0.1...v1.0.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* **settings:** accept quoted environment values as passed by docker --env-file ([def646b](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/def646b68a4fc167f1d40e08d8816eed65e3179c))
+* **settings:** accept quoted environment values as passed by docker --env-file ([b309d1d](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/b309d1dbb1ef0f670bf69e129e960c617ac491fc))
+
 ## [1.0.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v1.0.0...v1.0.1) (2026-10-25)
 
 ### Bug Fixes
