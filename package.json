@@ -37,14 +37,15 @@
     "@babel/core": "^8.0.7",
     "@babel/eslint-parser": "^8.0.7",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-sonarjs": "^3.0.7",
+    "eslint-plugin-sonarjs": "^4.2.2",
     "globals": "^17.13.0",
     "jest": "^30.2.0",
-    "markdownlint-cli2": "^0.20.0",
+    "markdownlint-cli2": "^0.24.0",
     "ts-api-utils": "^2.5.0"
   },
   "overrides": {
     "whatwg-url": "^14.0.0",
-    "glob": "^10"
+    "glob": "^10",
+    "typescript": "^5"
   }
 }

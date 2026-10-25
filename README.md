@@ -12,7 +12,7 @@ Group ids follow Yasno, e.g. `1.1` or `60.1`. The list of ids is taken from the 
 
 ## Requirements
 
-- Node.js 22 or newer (the Docker image uses Node 25).
+- Node.js 22.12 or newer (commander 15 needs `require(esm)`; the Docker image uses Node 25).
 - A Google service account JSON key with access to the target calendars, stored as `data/yasno-monitor.json`. Share each calendar with the service account e-mail.
 - A Telegram bot token from [@BotFather](https://t.me/BotFather), or (with `--as-user`) Telegram API id/hash for a user session.
 
