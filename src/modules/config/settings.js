@@ -10,12 +10,15 @@ const {Store} = require('../store/Store');
 
 /** Group ids as used by Yasno: "<group>.<subgroup>", e.g. "1.1" or "60.1". */
 const GROUP_ID_PATTERN = /^\d{1,3}\.\d{1,2}$/;
-const GROUP_FIELDS = ['calendarId', 'telegramChatId', 'telegramTopicId', 'svitlobotChannelIds'];
+const GROUP_FIELDS = ['calendarId', 'svitlobotChannelIds'];
+/** Telegram target kinds, as in telegram-forward-user-bot. */
+const TARGET_TYPES = ['user', 'bot', 'group', 'channel', 'topic'];
+const CONFIG_VERSION = 2;
 const PERSISTED_OPTIONS = ['scheduleUpdateInterval', 'pinMessage', 'unpinPrevious', 'ignoreStatus', 'debug'];
 const BOT_TOKEN_MIN_LENGTH = 43;
 
 const DEFAULT_DOCUMENT = {
-  version: 1,
+  version: CONFIG_VERSION,
   telegram: {
     botToken: null,
     managementBotToken: null,
@@ -91,7 +94,69 @@ function parseInteger(value) {
 }
 
 function emptyGroup() {
-  return {calendarId: null, telegramChatId: null, telegramTopicId: null, svitlobotChannelIds: []};
+  return {calendarId: null, telegramTargets: [], svitlobotChannelIds: []};
+}
+
+/** Guess the target type from the ids when it was not given (legacy data, env). */
+function inferTargetType(chatId, topicId) {
+  if (Number.isInteger(topicId) && topicId > 0) {
+    return 'topic';
+  }
+  return chatId > 0 ? 'user' : 'group';
+}
+
+/**
+ * Validate and normalise a Telegram target.
+ * @param {object} input - {type?, chatId, topicId?, label?, enabled?}
+ * @returns {{type: string, chatId: number, topicId: number|null, label: string|null, enabled: boolean}}
+ */
+function normalizeTarget(input) {
+  if (!input || typeof input !== 'object') {
+    throw new Error('Telegram target must be an object');
+  }
+  const chatId = parseInteger(input.chatId);
+  if (chatId === null || chatId === 0) {
+    throw new Error('Telegram chat id must be a non-zero integer');
+  }
+  let topicId = input.topicId === undefined || input.topicId === null || input.topicId === '' ? null : parseInteger(input.topicId);
+  if (topicId !== null && topicId < 0) {
+    throw new Error('Telegram topic id must be a non-negative integer');
+  }
+  if (topicId === 0) {
+    topicId = null;
+  }
+  let type = typeof input.type === 'string' && input.type.length > 0 ? input.type.toLowerCase() : inferTargetType(chatId, topicId);
+  if (!TARGET_TYPES.includes(type)) {
+    throw new Error(`Unknown target type: ${input.type}. Use one of ${TARGET_TYPES.join(', ')}`);
+  }
+  if (type === 'topic' && topicId === null) {
+    throw new Error('A topic target needs a topic id');
+  }
+  if (type !== 'topic' && topicId !== null) {
+    type = 'topic';
+  }
+  const label = typeof input.label === 'string' && input.label.trim().length > 0 ? input.label.trim().slice(0, 64) : null;
+  const enabled = input.enabled === undefined || input.enabled === null ? true : Boolean(input.enabled);
+  return {type, chatId, topicId, label, enabled};
+}
+
+/** Stable key of a target inside a group: "<chatId>:<topicId or 0>". */
+function targetKey(target) {
+  return `${target.chatId}:${target.topicId ?? 0}`;
+}
+
+/**
+ * Parse "<chatId>[/<topicId>]" as typed by a user or given in env.
+ * @returns {{chatId: number, topicId: number|null}|null}
+ */
+function parseTargetRef(value) {
+  const text = String(value ?? '').trim();
+  const match = /^(-?\d+)(?:[/:](\d+))?$/.exec(text);
+  if (!match) {
+    return null;
+  }
+  const topicId = match[2] === undefined ? null : Number.parseInt(match[2], 10);
+  return {chatId: Number.parseInt(match[1], 10), topicId: topicId === 0 ? null : topicId};
 }
 
 class Settings {
@@ -124,7 +189,53 @@ class Settings {
     } else if (!loaded) {
       this.store.save();
     }
+    this.migrate();
     return {loaded, imported};
+  }
+
+  /**
+   * Upgrade older document layouts in place.
+   * v1 -> v2: group.telegramChatId/telegramTopicId become group.telegramTargets[], and
+   * state.lastMessageIds is keyed by "<group>|<chatId>:<topicId>" instead of "<group>".
+   */
+  migrate() {
+    const version = this.store.get('version', 1);
+    if (version >= CONFIG_VERSION) {
+      return false;
+    }
+    this.store.update((data) => {
+      data.groups = data.groups || {};
+      data.state = data.state || {};
+      data.state.lastMessageIds = data.state.lastMessageIds || {};
+      for (const [groupId, group] of Object.entries(data.groups)) {
+        if (!group || typeof group !== 'object') {
+          continue;
+        }
+        const chatId = parseInteger(group.telegramChatId);
+        const topicId = parseInteger(group.telegramTopicId);
+        group.telegramTargets = Array.isArray(group.telegramTargets) ? group.telegramTargets : [];
+        if (chatId !== null && chatId !== 0) {
+          try {
+            const target = normalizeTarget({chatId, topicId});
+            if (!group.telegramTargets.some((item) => targetKey(item) === targetKey(target))) {
+              group.telegramTargets.push(target);
+            }
+            const lastMessageId = parseInteger(data.state.lastMessageIds[groupId]);
+            if (lastMessageId !== null) {
+              data.state.lastMessageIds[`${groupId}|${targetKey(target)}`] = lastMessageId;
+            }
+          } catch (error) {
+            this.#logger?.warn?.(`Group ${groupId}: telegram target not migrated: ${error.message}`);
+          }
+        }
+        delete data.state.lastMessageIds[groupId];
+        delete group.telegramChatId;
+        delete group.telegramTopicId;
+      }
+      data.version = CONFIG_VERSION;
+    });
+    this.#logger?.info?.(`Configuration upgraded to version ${CONFIG_VERSION}.`);
+    return true;
   }
 
   // ---------- groups ----------
@@ -182,13 +293,86 @@ class Settings {
     if (id === null) {
       return null;
     }
-    return {...emptyGroup(), ...this.store.get(['groups', id], {})};
+    const group = {...emptyGroup(), ...this.store.get(['groups', id], {})};
+    group.telegramTargets = Array.isArray(group.telegramTargets) ? group.telegramTargets : [];
+    return group;
+  }
+
+  #saveGroup(id, group) {
+    const isEmpty = group.calendarId === null && group.telegramTargets.length === 0 && group.svitlobotChannelIds.length === 0;
+    if (isEmpty) {
+      this.store.unset(['groups', id]);
+    } else {
+      this.store.set(['groups', id], group);
+    }
+    return group;
+  }
+
+  // ---------- telegram targets ----------
+
+  listTargets(groupId) {
+    return this.getGroup(groupId)?.telegramTargets ?? [];
+  }
+
+  findTarget(groupId, key) {
+    return this.listTargets(groupId).find((target) => targetKey(target) === key) ?? null;
+  }
+
+  /**
+   * Add a Telegram target to a group.
+   * @returns {object} The normalised target.
+   */
+  addTarget(groupId, input) {
+    const id = this.assertYasnoGroupId(groupId);
+    const target = normalizeTarget(input);
+    const group = this.getGroup(id);
+    if (group.telegramTargets.some((item) => targetKey(item) === targetKey(target))) {
+      throw new Error(`Target ${targetKey(target)} already exists in group ${id}`);
+    }
+    group.telegramTargets.push(target);
+    this.#saveGroup(id, group);
+    return target;
+  }
+
+  /**
+   * Change label/enabled/type of an existing target (ids are immutable; remove and add instead).
+   */
+  updateTarget(groupId, key, patch) {
+    const id = normalizeGroupId(groupId);
+    if (id === null) {
+      throw new Error(`Invalid group id: ${groupId}`);
+    }
+    const group = this.getGroup(id);
+    const index = group.telegramTargets.findIndex((item) => targetKey(item) === key);
+    if (index === -1) {
+      throw new Error(`Target ${key} not found in group ${id}`);
+    }
+    const current = group.telegramTargets[index];
+    const next = normalizeTarget({...current, ...patch, chatId: current.chatId, topicId: current.topicId});
+    group.telegramTargets[index] = next;
+    this.#saveGroup(id, group);
+    return next;
+  }
+
+  removeTarget(groupId, key) {
+    const id = normalizeGroupId(groupId);
+    if (id === null) {
+      throw new Error(`Invalid group id: ${groupId}`);
+    }
+    const group = this.getGroup(id);
+    const before = group.telegramTargets.length;
+    group.telegramTargets = group.telegramTargets.filter((item) => targetKey(item) !== key);
+    if (group.telegramTargets.length === before) {
+      throw new Error(`Target ${key} not found in group ${id}`);
+    }
+    this.store.unset(['state', 'lastMessageIds', `${id}|${key}`]);
+    return this.#saveGroup(id, group);
   }
 
   /**
    * Set one group field. Values are validated and coerced.
    * @param {string} groupId
-   * @param {'calendarId'|'telegramChatId'|'telegramTopicId'|'svitlobotChannelIds'} field
+   * @param {'calendarId'|'svitlobotChannelIds'} field
    * @param {any} value
    * @returns {object} The updated group record.
    */
@@ -206,20 +390,6 @@ class Settings {
         }
         break;
       }
-      case 'telegramChatId': {
-        coerced = parseInteger(value);
-        if (coerced === null || coerced === 0) {
-          throw new Error('Telegram chat id must be a non-zero integer');
-        }
-        break;
-      }
-      case 'telegramTopicId': {
-        coerced = parseInteger(value);
-        if (coerced === null || coerced < 0) {
-          throw new Error('Telegram topic id must be a non-negative integer');
-        }
-        break;
-      }
       case 'svitlobotChannelIds': {
         coerced = parseChannelIds(value);
         if (coerced.length === 0) {
@@ -232,8 +402,7 @@ class Settings {
     }
     const current = this.getGroup(id);
     current[field] = coerced;
-    this.store.set(['groups', id], current);
-    return current;
+    return this.#saveGroup(id, current);
   }
 
   unsetGroupField(groupId, field) {
@@ -246,13 +415,7 @@ class Settings {
     }
     const current = this.getGroup(id);
     current[field] = field === 'svitlobotChannelIds' ? [] : null;
-    const isEmpty = current.calendarId === null && current.telegramChatId === null && current.telegramTopicId === null && current.svitlobotChannelIds.length === 0;
-    if (isEmpty) {
-      this.store.unset(['groups', id]);
-    } else {
-      this.store.set(['groups', id], current);
-    }
-    return current;
+    return this.#saveGroup(id, current);
   }
 
   removeGroup(groupId) {
@@ -265,12 +428,12 @@ class Settings {
 
   // ---------- runtime state ----------
 
-  getLastMessageId(groupId) {
-    return this.store.get(['state', 'lastMessageIds', groupId], null);
+  getLastMessageId(groupId, key) {
+    return this.store.get(['state', 'lastMessageIds', `${groupId}|${key}`], null);
   }
 
-  setLastMessageId(groupId, messageId) {
-    this.store.set(['state', 'lastMessageIds', groupId], messageId);
+  setLastMessageId(groupId, key, messageId) {
+    this.store.set(['state', 'lastMessageIds', `${groupId}|${key}`], messageId);
   }
 
   getKnownYasnoStatuses() {
@@ -398,10 +561,51 @@ class Settings {
       (value) => this.store.get(['telegram', 'apiHash'], null) === value,
     );
 
+    // Telegram targets: TELEGRAM_CHAT_ID_GROUP_<g>_<s>="<chatId>[/<topicId>][,<chatId>[/<topicId>]...]"
+    // plus the legacy TELEGRAM_TOPIC_ID_GROUP_<g>_<s> that applies to the first chat id.
+    const chatPrefix = 'TELEGRAM_CHAT_ID_GROUP_';
+    const topicPrefix = 'TELEGRAM_TOPIC_ID_GROUP_';
+    for (const name of Object.keys(env)) {
+      if (!name.startsWith(chatPrefix)) {
+        continue;
+      }
+      const suffix = name.slice(chatPrefix.length);
+      const groupId = normalizeGroupId(suffix.replace(/_+/g, '.'));
+      if (groupId === null) {
+        this.#logger?.warn?.(`Environment variable ${name} does not match a known group id and is ignored.`);
+        continue;
+      }
+      const refs = String(env[name])
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+        .map(parseTargetRef);
+      if (refs.length === 0 || refs.some((ref) => ref === null)) {
+        this.#logger?.warn?.(`Environment variable ${name} is ignored: expected "<chatId>[/<topicId>]" entries.`);
+        continue;
+      }
+      const legacyTopic = parseInteger(env[`${topicPrefix}${suffix}`]);
+      if (legacyTopic !== null && legacyTopic > 0 && refs[0].topicId === null) {
+        refs[0].topicId = legacyTopic;
+      }
+      const wanted = refs.map((ref) => normalizeTarget(ref));
+      seed(
+        name,
+        () => this.listTargets(groupId).length === 0,
+        () => {
+          for (const target of wanted) {
+            this.addTarget(groupId, target);
+          }
+        },
+        () => {
+          const current = this.listTargets(groupId).map(targetKey);
+          return wanted.every((target) => current.includes(targetKey(target)));
+        },
+      );
+    }
+
     const fieldByPrefix = {
       CALENDAR_ID_GROUP_: 'calendarId',
-      TELEGRAM_CHAT_ID_GROUP_: 'telegramChatId',
-      TELEGRAM_TOPIC_ID_GROUP_: 'telegramTopicId',
       SVITLOBOT_CHANNEL_ID_GROUP_: 'svitlobotChannelIds',
     };
     for (const [prefix, field] of Object.entries(fieldByPrefix)) {
@@ -426,10 +630,7 @@ class Settings {
             if (field === 'svitlobotChannelIds') {
               return JSON.stringify(parseChannelIds(value)) === JSON.stringify(group.svitlobotChannelIds);
             }
-            if (field === 'calendarId') {
-              return group.calendarId === value;
-            }
-            return group[field] === parseInteger(value);
+            return group.calendarId === value;
           },
         );
       }
@@ -483,6 +684,9 @@ class Settings {
    */
   importLegacyValues(legacy) {
     let imported = 0;
+    this.store.update((data) => {
+      data.version = 1; // legacy values use the v1 layout; migrate() upgrades them afterwards
+    });
     const groupKey = /^(calendarId|telegramChatId|telegramTopicId|svitlobotChannelId|lastMessageId)Group(.+)$/;
     this.store.update((data) => {
       for (const [key, value] of Object.entries(legacy)) {
@@ -505,7 +709,7 @@ class Settings {
             }
             continue;
           }
-          data.groups[groupId] = {...emptyGroup(), ...(data.groups[groupId] || {})};
+          data.groups[groupId] = {calendarId: null, telegramChatId: null, telegramTopicId: null, svitlobotChannelIds: [], ...(data.groups[groupId] || {})};
           if (field === 'svitlobotChannelId') {
             const ids = parseChannelIds(value);
             if (ids.length > 0) {
@@ -557,6 +761,12 @@ module.exports = {
   DEFAULT_DOCUMENT,
   GROUP_FIELDS,
   GROUP_ID_PATTERN,
+  TARGET_TYPES,
+  CONFIG_VERSION,
+  normalizeTarget,
+  targetKey,
+  parseTargetRef,
+  inferTargetType,
   PERSISTED_OPTIONS,
   BOT_TOKEN_MIN_LENGTH,
   normalizeGroupId,

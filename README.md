@@ -6,7 +6,7 @@ Monitors the [Yasno](https://yasno.ua) planned power outage API for Kyiv, mirror
 
 1. Every `N` minutes the Yasno planned outages endpoint is fetched. When the payload checksum did not change nothing else happens.
 2. For every active group (a group with a calendar id) the outage intervals of today and tomorrow are compared with the events already present in its Google Calendar. Missing events are added, outdated ones removed.
-3. When the calendar changed, a message is sent to the group's Telegram chat (optionally into a forum topic, optionally pinned) and the svitlobot timetable of the group is updated.
+3. When the calendar changed, a message is sent to every enabled Telegram target of the group (users, bots, groups, channels or forum topics, optionally pinned) and the svitlobot timetable of the group is updated.
 
 Group ids follow Yasno, e.g. `1.1` or `60.1`. The list of ids is taken from the Yasno API on every check and stored, so the monitor adapts when Yasno changes the number of groups.
 
@@ -53,8 +53,8 @@ Precedence for every setting:
 | `TELEGRAM_ADMIN_IDS` | Comma separated Telegram user ids allowed to manage the monitor. Empty disables the management interface. |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | Only for `--as-user`. |
 | `CALENDAR_ID_GROUP_<g>_<s>` | Google Calendar id for group `g.s`. A group becomes active once it has a calendar id. |
-| `TELEGRAM_CHAT_ID_GROUP_<g>_<s>` | Chat id to post updates for group `g.s`. |
-| `TELEGRAM_TOPIC_ID_GROUP_<g>_<s>` | Forum topic id inside that chat (optional). |
+| `TELEGRAM_CHAT_ID_GROUP_<g>_<s>` | Telegram targets for group `g.s`: comma separated `<chatId>` or `<chatId>/<topicId>` entries, e.g. `-1001234567890/2,-1009876543210`. |
+| `TELEGRAM_TOPIC_ID_GROUP_<g>_<s>` | Legacy: topic id applied to the first chat id (optional). |
 | `SVITLOBOT_CHANNEL_ID_GROUP_<g>_<s>` | Comma separated svitlobot channel keys to update (optional). |
 
 `<g>_<s>` is the group id with the dot replaced by an underscore, e.g. `CALENDAR_ID_GROUP_12_1`. `CALENDAR_ID_GROUP_2` is accepted as `2.1`. Ids that Yasno does not return are rejected with a warning once the group list has been fetched.
@@ -87,8 +87,11 @@ Set `TELEGRAM_ADMIN_IDS` (or `--admin-ids`) to your Telegram user id and start a
 | `/schedule [group]` | Show the last fetched schedule (today and tomorrow) for all or one group. |
 | `/groups` | List configured groups with calendar, chat, topic and svitlobot settings. |
 | `/group <id>` | Show one group. |
-| `/group <id> set <field> <value>` | Set `calendar`, `chat`, `topic` or `svitlobot` (comma separated keys). The id must be one Yasno returns. |
+| `/group <id> set <field> <value>` | Set `calendar` or `svitlobot` (comma separated keys). The id must be one Yasno returns. |
 | `/group <id> unset <field>` | Remove a field. A group without calendar becomes inactive. |
+| `/group <id> targets` | List the Telegram targets of a group. |
+| `/group <id> target add <chatId>[/<topicId>] [label]` | Add a Telegram target. The type (user, bot, group, channel, topic) is inferred from the ids. |
+| `/group <id> target remove\|enable\|disable <chatId>[/<topicId>]` | Remove or pause a target. |
 | `/interval <minutes>` | Change the check interval (1–120). |
 | `/pin on\|off`, `/unpinprev on\|off`, `/ignorestatus on\|off`, `/debug on\|off` | Toggle options. Without an argument the current value is shown. |
 | `/statuses` | Yasno day statuses seen so far. |
@@ -99,19 +102,32 @@ Set `TELEGRAM_ADMIN_IDS` (or `--admin-ids`) to your Telegram user id and start a
 
 To discover a chat id and topic id, add the bot to the target group, open the topic and send `/whoami` there.
 
+### Telegram targets
+
+Each group can post to any number of Telegram targets, modelled as in [telegram-forward-user-bot](https://github.com/PetroVoronov/telegram-forward-user-bot): a target has a type (`user`, `bot`, `group`, `channel` or `topic`), a chat id, an optional topic id, an optional label and an enabled flag. Pinning and unpinning are tracked per target.
+
+In the menu open Groups, pick a group and tap "Add target". You choose the type first. In user mode (`--as-user`) the bot then lists your chats of that type (and the topics of a forum), so you just tap the one you want. In bot mode the Bot API cannot list chats, so you type the id instead; `/whoami` inside the target chat tells you the chat id and topic id. A bot can only message users who have started a chat with it, and it must be a member (or admin, for channels) of the chats it posts to.
+
 ## Storage layout
 
 `data/config.json`:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "telegram": { "botToken": "…", "managementBotToken": null, "apiId": null, "apiHash": null, "adminIds": [123456789] },
   "options": { "pinMessage": true },
   "groups": {
-    "1.1": { "calendarId": "…@group.calendar.google.com", "telegramChatId": -1001234567890, "telegramTopicId": 2, "svitlobotChannelIds": ["KEY"] }
+    "1.1": {
+      "calendarId": "…@group.calendar.google.com",
+      "telegramTargets": [
+        { "type": "topic", "chatId": -1001234567890, "topicId": 2, "label": "Main", "enabled": true },
+        { "type": "channel", "chatId": -1009876543210, "topicId": null, "label": null, "enabled": true }
+      ],
+      "svitlobotChannelIds": ["KEY"]
+    }
   },
-  "state": { "lastMessageIds": { "1.1": 578 }, "knownYasnoStatuses": { "ScheduleApplies": { } } },
+  "state": { "lastMessageIds": { "1.1|-1001234567890:2": 578 }, "knownYasnoStatuses": { "ScheduleApplies": { } }, "yasnoGroupIds": ["1.1", "2.1"] },
   "meta": { "legacyImported": true }
 }
 ```
@@ -120,7 +136,7 @@ Other files in `data/`: `yasno-monitor.json` (Google key) and `session/` (only w
 
 ### Upgrading from 0.10 and earlier
 
-Earlier versions kept one file per key in `data/storage`. On the first start the new version imports those values into `data/config.json` once (`meta.legacyImported`) and leaves the directory untouched. After checking `/status` or the config file you can delete `data/storage`.
+Earlier versions kept one file per key in `data/storage`. On the first start the new version imports those values into `data/config.json` once (`meta.legacyImported`) and leaves the directory untouched. After checking `/status` or the config file you can delete `data/storage`. A `config.json` written by an earlier 1.x pre-release (version 1, single `telegramChatId`/`telegramTopicId` per group) is upgraded to version 2 with a `telegramTargets` list automatically.
 
 ## Development
 

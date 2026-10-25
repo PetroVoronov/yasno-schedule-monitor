@@ -16,10 +16,9 @@ describe('management helpers', () => {
 
   test('resolveField maps aliases', () => {
     expect(resolveField('calendar')).toBe('calendarId');
-    expect(resolveField('Chat')).toBe('telegramChatId');
-    expect(resolveField('topic')).toBe('telegramTopicId');
-    expect(resolveField('svitlobot')).toBe('svitlobotChannelIds');
-    expect(resolveField('telegramChatId')).toBe('telegramChatId');
+    expect(resolveField('Svitlobot')).toBe('svitlobotChannelIds');
+    expect(resolveField('calendarId')).toBe('calendarId');
+    expect(resolveField('chat')).toBeNull();
     expect(resolveField('nope')).toBeNull();
   });
 
@@ -113,8 +112,12 @@ function fakeBot() {
   return {bot, dispatch, api};
 }
 
+function fakeTarget(overrides = {}) {
+  return {type: 'topic', chatId: -100, topicId: 2, label: null, enabled: true, key: '-100:2', title: 'TestSome', chatType: 'group', error: null, resolved: true, ...overrides};
+}
+
 function fakeController(overrides = {}) {
-  const groups = [{id: '1.1', calendarId: 'cal', telegramChatId: -1, telegramTopicId: null, svitlobotChannelIds: [], chatTitle: 'Chat'}];
+  const groups = [{id: '1.1', calendarId: 'cal', telegramTargets: [fakeTarget()], svitlobotChannelIds: []}];
   const options = {scheduleUpdateInterval: 5, pinMessage: false, unpinPrevious: false, ignoreStatus: false, debug: false};
   return {
     getAdminIds: () => [1, 2],
@@ -135,8 +138,30 @@ function fakeController(overrides = {}) {
       checkInProgress: false,
       storagePath: 'data/config.json',
     }),
-    getGroup: (id) => groups.find((group) => group.id === id) || {id, calendarId: null, telegramChatId: null, telegramTopicId: null, svitlobotChannelIds: [], chatTitle: null},
+    getGroup: (id) => groups.find((group) => group.id === id) || {id, calendarId: null, telegramTargets: [], svitlobotChannelIds: []},
     getYasnoGroupIds: () => ['1.1', '1.2', '2.1', '60.1'],
+    addTarget: jest.fn(async (id, input) => {
+      const target = fakeTarget({...input, topicId: input.topicId ?? null, type: input.type ?? (input.topicId ? 'topic' : 'group'), key: `${input.chatId}:${input.topicId ?? 0}`, title: null, resolved: true});
+      const group = groups.find((item) => item.id === id);
+      if (group) {
+        group.telegramTargets.push(target);
+      } else {
+        groups.push({id, calendarId: null, telegramTargets: [target], svitlobotChannelIds: []});
+      }
+      return target;
+    }),
+    updateTarget: jest.fn(async (id, key, patch) => {
+      const target = groups.find((item) => item.id === id).telegramTargets.find((item) => item.key === key);
+      Object.assign(target, patch);
+      return target;
+    }),
+    removeTarget: jest.fn(async (id, key) => {
+      const group = groups.find((item) => item.id === id);
+      group.telegramTargets = group.telegramTargets.filter((item) => item.key !== key);
+      return group;
+    }),
+    listDialogs: jest.fn(async () => null),
+    listTopics: jest.fn(async () => null),
     getSchedule: () => null,
     getKnownStatuses: () => ({}),
     forceCheck: jest.fn().mockResolvedValue({changed: true, skipped: false, error: null}),
@@ -268,8 +293,9 @@ describe('management bot menu', () => {
     expect(buttons(groups.edits[0].options.reply_markup)).toEqual(expect.arrayContaining(['g:1.1', 'ga']));
     const group = await dispatch({callbackData: 'g:1.1', from: admin, chat: privateChat});
     const data = buttons(group.edits[0].options.reply_markup);
-    expect(data).toEqual(expect.arrayContaining(['ge:1.1:calendarId', 'gc:1.1:calendarId', 'ge:1.1:telegramTopicId', 'gr:1.1', 'm:groups']));
-    expect(data).not.toContain('gc:1.1:telegramTopicId');
+    expect(data).toEqual(expect.arrayContaining(['ge:1.1:calendarId', 'gc:1.1:calendarId', 'tg:1.1:-100:2', 'ta:1.1', 'gr:1.1', 'm:groups']));
+    expect(data).not.toContain('gc:1.1:svitlobotChannelIds');
+    expect(group.edits[0].message).toContain('TestSome');
     const add = await dispatch({callbackData: 'ga', from: admin, chat: privateChat});
     expect(add.edits[0].message).toContain('4 known from Yasno');
     expect(buttons(add.edits[0].options.reply_markup)).toEqual(['g:1.2', 'g:2.1', 'g:60.1', 'gt', 'm:groups']);
@@ -298,11 +324,11 @@ describe('management bot menu', () => {
 
   test('a pending prompt can be cancelled and validation errors keep it open', async () => {
     const {bot, dispatch} = fakeBot();
-    const controller = fakeController({setGroupField: jest.fn().mockRejectedValue(new Error('Telegram chat id must be a non-zero integer'))});
+    const controller = fakeController({setGroupField: jest.fn().mockRejectedValue(new Error('Calendar id must be a non-empty string'))});
     createManagementBot({bot, controller, i18n, logger});
-    await dispatch({callbackData: 'ge:1.1:telegramChatId', from: admin, chat: privateChat});
+    await dispatch({callbackData: 'ge:1.1:calendarId', from: admin, chat: privateChat});
     const bad = await dispatch({text: 'abc', from: admin, chat: privateChat});
-    expect(bad.replies[0].message).toContain('non-zero integer');
+    expect(bad.replies[0].message).toContain('non-empty string');
     const cancelled = await dispatch({callbackData: 'x:1.1', from: admin, chat: privateChat});
     expect(cancelled.answers[0].text).toBe('Cancelled.');
     expect(cancelled.edits[0].message).toContain('Group 1.1');

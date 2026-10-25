@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {Settings, normalizeGroupId, parseAdminIds, parseChannelIds} = require('../src/modules/config/settings');
+const {Settings, normalizeGroupId, parseAdminIds, parseChannelIds, normalizeTarget, targetKey, parseTargetRef} = require('../src/modules/config/settings');
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ysm-settings-'));
@@ -34,13 +34,34 @@ describe('helpers', () => {
     expect(parseAdminIds([5, '6'])).toEqual([5, 6]);
     expect(parseChannelIds(' A ,B,,A')).toEqual(['A', 'B']);
   });
+
+  test('normalizeTarget infers type, validates ids and builds keys', () => {
+    expect(normalizeTarget({chatId: '-100', topicId: '7'})).toEqual({type: 'topic', chatId: -100, topicId: 7, label: null, enabled: true});
+    expect(normalizeTarget({chatId: 42})).toEqual({type: 'user', chatId: 42, topicId: null, label: null, enabled: true});
+    expect(normalizeTarget({chatId: -5, topicId: 0, label: '  Main  ', enabled: false})).toEqual({type: 'group', chatId: -5, topicId: null, label: 'Main', enabled: false});
+    expect(normalizeTarget({type: 'Channel', chatId: -100})).toMatchObject({type: 'channel'});
+    expect(() => normalizeTarget({chatId: 0})).toThrow(/non-zero/);
+    expect(() => normalizeTarget({chatId: -1, topicId: -2})).toThrow(/non-negative/);
+    expect(() => normalizeTarget({type: 'topic', chatId: -1})).toThrow(/topic id/);
+    expect(() => normalizeTarget({type: 'nope', chatId: -1})).toThrow(/Unknown target type/);
+    expect(targetKey({chatId: -100, topicId: null})).toBe('-100:0');
+    expect(targetKey({chatId: -100, topicId: 7})).toBe('-100:7');
+  });
+
+  test('parseTargetRef accepts chatId with optional topic', () => {
+    expect(parseTargetRef('-1001/12')).toEqual({chatId: -1001, topicId: 12});
+    expect(parseTargetRef(' 555 ')).toEqual({chatId: 555, topicId: null});
+    expect(parseTargetRef('-1:0')).toEqual({chatId: -1, topicId: null});
+    expect(parseTargetRef('abc')).toBeNull();
+    expect(parseTargetRef('-1/x')).toBeNull();
+  });
 });
 
 describe('Settings groups', () => {
   test('setGroupField validates and coerces, configuredGroupIds needs a calendar', () => {
     const settings = makeSettings();
     expect(settings.configuredGroupIds()).toEqual([]);
-    settings.setGroupField('2_1', 'telegramChatId', '-1001');
+    settings.addTarget('2_1', {chatId: '-1001'});
     expect(settings.configuredGroupIds()).toEqual([]);
     expect(settings.knownGroupIds()).toEqual(['2.1']);
     settings.setGroupField('2.1', 'calendarId', ' cal@group ');
@@ -48,8 +69,11 @@ describe('Settings groups', () => {
     settings.setGroupField('2.1', 'svitlobotChannelIds', 'a,b');
     settings.setGroupField('10.1', 'calendarId', 'cal10');
     expect(settings.configuredGroupIds()).toEqual(['1.2', '2.1', '10.1']);
-    expect(settings.getGroup('2.1')).toEqual({calendarId: 'cal@group', telegramChatId: -1001, telegramTopicId: null, svitlobotChannelIds: ['a', 'b']});
-    expect(() => settings.setGroupField('2.1', 'telegramChatId', 'abc')).toThrow(/integer/);
+    expect(settings.getGroup('2.1')).toEqual({
+      calendarId: 'cal@group',
+      telegramTargets: [{type: 'group', chatId: -1001, topicId: null, label: null, enabled: true}],
+      svitlobotChannelIds: ['a', 'b'],
+    });
     expect(() => settings.setGroupField('x.y', 'calendarId', 'x')).toThrow(/Invalid group id/);
     expect(() => settings.setGroupField('2.1', 'nope', 'x')).toThrow(/Unknown group field/);
   });
@@ -57,11 +81,59 @@ describe('Settings groups', () => {
   test('unsetGroupField removes the record when nothing is left', () => {
     const settings = makeSettings();
     settings.setGroupField('1.1', 'calendarId', 'cal');
-    settings.setGroupField('1.1', 'telegramTopicId', 5);
+    settings.setGroupField('1.1', 'svitlobotChannelIds', 'k');
     settings.unsetGroupField('1.1', 'calendarId');
     expect(settings.knownGroupIds()).toEqual(['1.1']);
-    settings.unsetGroupField('1.1', 'telegramTopicId');
+    settings.unsetGroupField('1.1', 'svitlobotChannelIds');
     expect(settings.knownGroupIds()).toEqual([]);
+  });
+
+  test('targets can be added, updated and removed; duplicates are rejected', () => {
+    const settings = makeSettings();
+    const first = settings.addTarget('1.1', {chatId: -100, topicId: 2, label: 'Main'});
+    settings.addTarget('1.1', {type: 'channel', chatId: -200});
+    expect(() => settings.addTarget('1.1', {chatId: '-100', topicId: '2'})).toThrow(/already exists/);
+    expect(settings.listTargets('1.1').map(targetKey)).toEqual(['-100:2', '-200:0']);
+    settings.setLastMessageId('1.1', targetKey(first), 77);
+    expect(settings.getLastMessageId('1.1', '-100:2')).toBe(77);
+
+    const updated = settings.updateTarget('1.1', '-100:2', {enabled: false, label: 'Paused', chatId: -999});
+    expect(updated).toEqual({type: 'topic', chatId: -100, topicId: 2, label: 'Paused', enabled: false});
+    expect(() => settings.updateTarget('1.1', '-1:0', {enabled: true})).toThrow(/not found/);
+
+    settings.removeTarget('1.1', '-100:2');
+    expect(settings.listTargets('1.1').map(targetKey)).toEqual(['-200:0']);
+    expect(settings.getLastMessageId('1.1', '-100:2')).toBeNull();
+    settings.removeTarget('1.1', '-200:0');
+    expect(settings.knownGroupIds()).toEqual([]);
+  });
+
+  test('a v1 document is migrated to targets on init', () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'config.json');
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        groups: {
+          '1.1': {calendarId: 'cal', telegramChatId: -100, telegramTopicId: 2, svitlobotChannelIds: []},
+          '2.1': {calendarId: 'cal2', telegramChatId: null, telegramTopicId: null, svitlobotChannelIds: []},
+        },
+        state: {lastMessageIds: {'1.1': 614}, knownYasnoStatuses: {}},
+      }),
+    );
+    const settings = new Settings({filePath});
+    settings.init();
+    expect(settings.store.get('version')).toBe(2);
+    expect(settings.getGroup('1.1')).toEqual({
+      calendarId: 'cal',
+      telegramTargets: [{type: 'topic', chatId: -100, topicId: 2, label: null, enabled: true}],
+      svitlobotChannelIds: [],
+    });
+    expect(settings.getGroup('2.1').telegramTargets).toEqual([]);
+    expect(settings.getLastMessageId('1.1', '-100:2')).toBe(614);
+    expect(settings.store.get(['groups', '1.1', 'telegramChatId'], 'gone')).toBe('gone');
+    expect(settings.store.get(['state', 'lastMessageIds', '1.1'], 'gone')).toBe('gone');
   });
 });
 
@@ -116,23 +188,32 @@ describe('Settings env seeding', () => {
       TELEGRAM_BOT_AUTH_TOKEN: token,
       TELEGRAM_ADMIN_IDS: '10, 20',
       CALENDAR_ID_GROUP_1_1: 'cal11',
-      TELEGRAM_CHAT_ID_GROUP_1_1: '-100',
+      TELEGRAM_CHAT_ID_GROUP_1_1: '-100, -200/5',
       TELEGRAM_TOPIC_ID_GROUP_1_1: '7',
       SVITLOBOT_CHANNEL_ID_GROUP_1__1: 'KEY1',
       CALENDAR_ID_GROUP_2: 'cal21',
+      TELEGRAM_CHAT_ID_GROUP_2_1: 'nonsense',
       CALENDAR_ID_GROUP_X: 'ignored',
     });
     expect(applied.sort()).toEqual(
-      ['TELEGRAM_BOT_AUTH_TOKEN', 'TELEGRAM_ADMIN_IDS', 'CALENDAR_ID_GROUP_1_1', 'TELEGRAM_CHAT_ID_GROUP_1_1', 'TELEGRAM_TOPIC_ID_GROUP_1_1', 'SVITLOBOT_CHANNEL_ID_GROUP_1__1', 'CALENDAR_ID_GROUP_2'].sort(),
+      ['TELEGRAM_BOT_AUTH_TOKEN', 'TELEGRAM_ADMIN_IDS', 'CALENDAR_ID_GROUP_1_1', 'TELEGRAM_CHAT_ID_GROUP_1_1', 'SVITLOBOT_CHANNEL_ID_GROUP_1__1', 'CALENDAR_ID_GROUP_2'].sort(),
     );
-    expect(settings.getGroup('1.1')).toEqual({calendarId: 'cal11', telegramChatId: -100, telegramTopicId: 7, svitlobotChannelIds: ['KEY1']});
+    expect(settings.getGroup('1.1')).toEqual({
+      calendarId: 'cal11',
+      telegramTargets: [
+        {type: 'topic', chatId: -100, topicId: 7, label: null, enabled: true},
+        {type: 'topic', chatId: -200, topicId: 5, label: null, enabled: true},
+      ],
+      svitlobotChannelIds: ['KEY1'],
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('TELEGRAM_CHAT_ID_GROUP_2_1'));
     expect(settings.getGroup('2.1').calendarId).toBe('cal21');
     expect(settings.getAdminIds()).toEqual([10, 20]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('CALENDAR_ID_GROUP_X'));
 
     settings.setGroupField('1.1', 'calendarId', 'changed-via-bot');
     warn.mockClear();
-    const appliedAgain = settings.seedFromEnv({CALENDAR_ID_GROUP_1_1: 'cal11', TELEGRAM_CHAT_ID_GROUP_1_1: '-100'});
+    const appliedAgain = settings.seedFromEnv({CALENDAR_ID_GROUP_1_1: 'cal11', TELEGRAM_CHAT_ID_GROUP_1_1: '-100/7,-200/5'});
     expect(appliedAgain).toEqual([]);
     expect(settings.getGroup('1.1').calendarId).toBe('changed-via-bot');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('CALENDAR_ID_GROUP_1_1'));
@@ -166,9 +247,14 @@ describe('Settings legacy import', () => {
     const result = settings.init({legacyDir});
     expect(result.loaded).toBe(false);
     expect(result.imported).toBe(9);
-    expect(settings.getGroup('1.1')).toEqual({calendarId: 'cal11', telegramChatId: -100500, telegramTopicId: 2, svitlobotChannelIds: ['K1', 'K2']});
+    expect(settings.getGroup('1.1')).toEqual({
+      calendarId: 'cal11',
+      telegramTargets: [{type: 'topic', chatId: -100500, topicId: 2, label: null, enabled: true}],
+      svitlobotChannelIds: ['K1', 'K2'],
+    });
     expect(settings.getGroup('2.1').calendarId).toBe('cal21');
-    expect(settings.getLastMessageId('1.1')).toBe(578);
+    expect(settings.getLastMessageId('1.1', '-100500:2')).toBe(578);
+    expect(settings.store.get('version')).toBe(2);
     expect(settings.getBotToken()).toBe(token);
     expect(Object.keys(settings.getKnownYasnoStatuses())).toEqual(['ScheduleApplies']);
     expect(fs.readdirSync(legacyDir)).toHaveLength(Object.keys(files).length);

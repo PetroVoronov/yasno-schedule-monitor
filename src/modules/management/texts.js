@@ -4,9 +4,15 @@ const template = require('string-template');
 
 const FIELD_LABELS = {
   calendarId: 'calendar',
-  telegramChatId: 'chat',
-  telegramTopicId: 'topic',
   svitlobotChannelIds: 'svitlobot',
+};
+
+const TARGET_TYPE_LABELS = {
+  user: 'User',
+  bot: 'Bot',
+  group: 'Group',
+  channel: 'Channel',
+  topic: 'Topic',
 };
 
 function escapeHtml(value) {
@@ -87,18 +93,43 @@ function createTexts({controller, i18n, timeZone}) {
       lines.push(`/${command} - ${escapeHtml(__(description))}`);
     }
     lines.push('');
-    lines.push(escapeHtml(__('Group fields: calendar, chat, topic, svitlobot. Group ids as in Yasno, e.g. 1.1 or 60.1.')));
+    lines.push(escapeHtml(__('Group fields: calendar, svitlobot. Telegram targets: /group <id> target add <chatId>[/<topicId>] [label]. Group ids as in Yasno, e.g. 1.1 or 60.1.')));
     return lines.join('\n');
+  }
+
+  /** Short one-line name of a target for buttons and lists. */
+  function targetName(target) {
+    const base = target.label || target.title || `${__(TARGET_TYPE_LABELS[target.type] || target.type)} ${target.chatId}`;
+    return target.topicId !== null && target.topicId !== undefined && !target.label ? `${base} #${target.topicId}` : base;
+  }
+
+  function formatTarget(target) {
+    const parts = [];
+    parts.push(target.enabled ? '✅' : '⏸');
+    parts.push(escapeHtml(targetName(target)));
+    const details = [`${escapeHtml(__(TARGET_TYPE_LABELS[target.type] || target.type))}`, `<code>${target.chatId}</code>`];
+    if (target.topicId !== null && target.topicId !== undefined) {
+      details.push(`${escapeHtml(__('topic'))} <code>${target.topicId}</code>`);
+    }
+    parts.push(`(${details.join(', ')})`);
+    if (target.enabled && target.error) {
+      parts.push(`⚠️ ${escapeHtml(target.error)}`);
+    } else if (target.enabled && target.resolved === false) {
+      parts.push(`⚠️ ${escapeHtml(__('not resolved'))}`);
+    }
+    return parts.join(' ');
   }
 
   function formatGroup(group) {
     const lines = [`<b>${escapeHtml(__('Group {group}', {group: group.id}))}</b>`];
-    const chatTitle = group.chatTitle ? ` (${escapeHtml(group.chatTitle)})` : '';
     lines.push(`  ${escapeHtml(__('calendar'))}: <code>${escapeHtml(group.calendarId ?? none())}</code>`);
-    lines.push(`  ${escapeHtml(__('chat'))}: <code>${escapeHtml(group.telegramChatId ?? none())}</code>${chatTitle}`);
-    lines.push(`  ${escapeHtml(__('topic'))}: <code>${escapeHtml(group.telegramTopicId ?? none())}</code>`);
     const svitlobot = group.svitlobotChannelIds?.length ? group.svitlobotChannelIds.join(', ') : none();
     lines.push(`  ${escapeHtml(__('svitlobot'))}: <code>${escapeHtml(svitlobot)}</code>`);
+    const targets = Array.isArray(group.telegramTargets) ? group.telegramTargets : [];
+    lines.push(`  ${escapeHtml(__('Telegram targets'))}: ${targets.length === 0 ? escapeHtml(none()) : ''}`);
+    for (const target of targets) {
+      lines.push(`    ${formatTarget(target)}`);
+    }
     if (group.calendarId === null) {
       lines.push(`  ⚠️ ${escapeHtml(__('inactive: no calendar configured'))}`);
     }
@@ -205,7 +236,7 @@ function createTexts({controller, i18n, timeZone}) {
     return `<b>${escapeHtml(__('Known Yasno statuses'))}</b>\n${statusLines}`;
   }
 
-  return {__, yesNo, none, helpText, formatGroup, statusText, scheduleText, whoamiText, adminsText, statusesText};
+  return {__, yesNo, none, helpText, formatGroup, formatTarget, targetName, statusText, scheduleText, whoamiText, adminsText, statusesText};
 }
 
 module.exports = {
@@ -215,5 +246,6 @@ module.exports = {
   formatDateTime,
   formatDuration,
   FIELD_LABELS,
+  TARGET_TYPE_LABELS,
   COMMAND_DESCRIPTIONS,
 };

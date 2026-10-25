@@ -8,7 +8,7 @@ const { Command, Option, InvalidOptionArgumentError } = require('commander');
 const { securedLogger: log } = require('./modules/logging/logging');
 const { name: scriptName, version: scriptVersion } = require('./version');
 const i18n = require('./modules/i18n/i18n.config');
-const { Settings, parseAdminIds, BOT_TOKEN_MIN_LENGTH } = require('./modules/config/settings');
+const { Settings, parseAdminIds, targetKey, BOT_TOKEN_MIN_LENGTH } = require('./modules/config/settings');
 const { createManagementBot } = require('./modules/management/management');
 const axios = require('axios');
 const fs = require('node:fs');
@@ -146,8 +146,10 @@ let telegramClient = null;
 let telegramBot = null;
 let managementBot = null;
 let management = null;
-const telegramTargetEntities = {};
-const telegramTargetTitles = {};
+/** Resolved Telegram targets: "<group>|<chatId>:<topicId>" -> {title, entity, chatType, error}. */
+const telegramTargetRuntime = new Map();
+const dialogsCacheTtlMs = 5 * 60 * 1000;
+let dialogsCache = { items: [], at: 0 };
 
 let cachedPrivateKey = null;
 let cachedCalendarAuth = null;
@@ -803,38 +805,43 @@ async function telegramSendUpdate(group, todayStr, dayStr, groupEvents, updatedO
   if (updatedOn) {
     message += `\n${template(textScheduleUpdatedAt, { timestamp: formatUpdatedOn(updatedOn) })}`;
   }
-  const targetTitle = telegramTargetTitles[group];
-  if (targetTitle === undefined) {
+  const targets = settings.listTargets(group).filter((target) => target.enabled);
+  if (targets.length === 0) {
     log.debug(`Telegram is not configured for group ${group}`);
     return;
   }
-  const telegramTopicId = settings.getGroup(group)?.telegramTopicId || 0;
-  try {
-    const messageId = await telegramSendMessage(group, message);
-    if (messageId === null) {
-      return;
-    }
-    const previousMessageId = settings.getLastMessageId(group);
-    settings.setLastMessageId(group, messageId);
-    if (!options.pinMessage) {
-      return;
+  for (const target of targets) {
+    const key = targetKey(target);
+    const info = telegramTargetRuntime.get(`${group}|${key}`);
+    if (!info || info.error) {
+      const reason = info?.error ? `: ${info.error}` : '';
+      log.warn(`Telegram target ${key} for group ${group} is not available, message skipped${reason}`);
+      continue;
     }
     try {
-      await telegramPinMessage(group, messageId);
-      log.debug(`Telegram message for group ${group} with id: ${messageId} pinned to "${targetTitle}" with topic ${telegramTopicId}`);
-      if (options.unpinPrevious && previousMessageId !== undefined && previousMessageId !== null) {
-        try {
-          await telegramUnpinMessage(group, previousMessageId);
-          log.debug(`Telegram message for group ${group} with id: ${previousMessageId} unpinned from "${targetTitle}" with topic ${telegramTopicId}`);
-        } catch (error) {
-          log.error(`Error unpinning Telegram message for group ${group} in "${targetTitle}": ${error}`);
+      const messageId = await telegramSendMessage(target, info, message);
+      const previousMessageId = settings.getLastMessageId(group, key);
+      settings.setLastMessageId(group, key, messageId);
+      if (!options.pinMessage) {
+        continue;
+      }
+      try {
+        await telegramPinMessage(target, info, messageId);
+        log.debug(`Telegram message ${messageId} for group ${group} pinned in "${info.title}" (${key})`);
+        if (options.unpinPrevious && previousMessageId !== undefined && previousMessageId !== null) {
+          try {
+            await telegramUnpinMessage(target, info, previousMessageId);
+            log.debug(`Telegram message ${previousMessageId} for group ${group} unpinned in "${info.title}" (${key})`);
+          } catch (error) {
+            log.error(`Error unpinning Telegram message for group ${group} in "${info.title}": ${error}`);
+          }
         }
+      } catch (error) {
+        log.error(`Error pinning Telegram message for group ${group} in "${info.title}": ${error}`);
       }
     } catch (error) {
-      log.error(`Error pinning Telegram message for group ${group} in "${targetTitle}": ${error}`);
+      log.error(`Error sending Telegram message for group ${group} to "${info.title}" (${key}): ${error}`);
     }
-  } catch (error) {
-    log.error(`Error sending Telegram message for group ${group} to "${targetTitle}": ${error}`);
   }
 }
 
@@ -941,109 +948,205 @@ async function getTelegramClient() {
   return telegramBot.api;
 }
 
-async function getTelegramTargetEntity(group) {
-  const groupConfig = settings.getGroup(group);
-  const telegramChatId = groupConfig?.telegramChatId ?? null;
-  const telegramTopicId = groupConfig?.telegramTopicId ?? 0;
-  delete telegramTargetEntities[group];
-  delete telegramTargetTitles[group];
-  if (typeof telegramChatId !== 'number' || telegramChatId === 0) {
-    log.warn(`Telegram chat ID for group ${group} is not valid! No notification will be sent!`);
-    return;
+function dialogChatType(dialog) {
+  if (dialog.isUser === true) {
+    return dialog.entity?.bot === true ? 'bot' : 'user';
   }
-  if (options.asUser === false) {
-    const entity = await telegramClient.getChat(telegramChatId);
-    telegramTargetTitles[group] = entity.title || `${entity.first_name || ''} ${entity.last_name || ''} (${entity.username || ''})`;
-    log.debug(`Telegram chat "${telegramTargetTitles[group]}" with ID ${telegramChatId} found!`);
-    telegramTargetEntities[group] = entity;
-    return;
+  if (dialog.isChannel === true && dialog.isGroup !== true) {
+    return 'channel';
   }
-  const dialogs = await telegramClient.getDialogs();
-  let chatId = telegramChatId > 0 ? telegramChatId : -telegramChatId;
-  if (chatId > 1000000000000) {
-    chatId = chatId - 1000000000000;
-  }
-  const availableDialogs = dialogs.filter((dialog) => dialog.entity?.migratedTo === undefined || dialog.entity?.migratedTo === null);
-  const targetDialog = availableDialogs.find((item) => `${chatId}` === `${item.entity.id}`);
-  if (targetDialog === undefined) {
-    throw new Error(`Telegram chat with ID ${telegramChatId} not found`);
-  }
-  const title =
-    targetDialog.entity.title ||
-    `${targetDialog.entity.firstName || ''} ${targetDialog.entity.lastName || ''} (${targetDialog.entity.username || ''})`;
-  if (telegramTopicId > 0) {
-    const response = await telegramClient.invoke(
-      new Api.messages.GetForumTopics({
-        peer: targetDialog.entity,
-        q: '',
-        limit: 100,
-        offsetId: 0,
-        offsetDate: 0,
-        offsetTopic: 0,
-      }),
-    );
-    if (!Array.isArray(response.topics) || response.topics.length === 0) {
-      throw new Error(`No topics found in "${title}" (${telegramChatId})!`);
-    }
-    const targetTopic = response.topics.find((topic) => topic.id === telegramTopicId);
-    if (!targetTopic) {
-      throw new Error(`Topic with id ${telegramTopicId} not found in "${title}" (${telegramChatId})!`);
-    }
-    log.debug(`Telegram topic "${targetTopic.title}" in chat "${title}" with ID ${telegramChatId} found!`);
-  } else {
-    log.debug(`Telegram chat "${title}" with ID ${telegramChatId} found!`);
-  }
-  telegramTargetTitles[group] = title;
-  telegramTargetEntities[group] = targetDialog.entity;
+  return 'group';
 }
 
-async function telegramSendMessage(group, messageText) {
-  if (telegramClient === null || telegramTargetEntities[group] === undefined) {
+function normalizeDialogId(chatId) {
+  let id = chatId > 0 ? chatId : -chatId;
+  if (id > 1000000000000) {
+    id = id - 1000000000000;
+  }
+  return `${id}`;
+}
+
+/** User mode only: cached dialog list of the account. */
+async function getDialogs(force = false) {
+  if (options.asUser !== true || telegramClient === null) {
+    return [];
+  }
+  if (!force && dialogsCache.items.length > 0 && Date.now() - dialogsCache.at < dialogsCacheTtlMs) {
+    return dialogsCache.items;
+  }
+  const dialogs = await telegramClient.getDialogs();
+  dialogsCache = {
+    items: dialogs.filter((dialog) => dialog.entity && (dialog.entity.migratedTo === undefined || dialog.entity.migratedTo === null)),
+    at: Date.now(),
+  };
+  return dialogsCache.items;
+}
+
+function dialogTitle(entity) {
+  return entity.title || `${entity.firstName || ''} ${entity.lastName || ''} (${entity.username || ''})`.trim();
+}
+
+/** User mode only: chats of the account, optionally filtered by target type. */
+async function listDialogs(type = null, force = false) {
+  if (options.asUser !== true) {
+    return null;
+  }
+  const dialogs = await getDialogs(force);
+  const items = [];
+  for (const dialog of dialogs) {
+    const chatType = dialogChatType(dialog);
+    const isForum = dialog.entity?.forum === true;
+    const matches = type === null || type === chatType || (type === 'topic' && isForum);
+    if (!matches) {
+      continue;
+    }
+    items.push({ chatId: Number(telegramChatIdForDialog(dialog)), title: dialogTitle(dialog.entity), type: chatType, isForum });
+  }
+  return items;
+}
+
+/** Bot API style chat id for a teleproto dialog (-100<id> for channels/supergroups, -<id> for groups). */
+function telegramChatIdForDialog(dialog) {
+  const id = Number(dialog.entity.id);
+  if (dialog.isUser === true) {
+    return id;
+  }
+  if (dialog.isChannel === true) {
+    return -(1000000000000 + id);
+  }
+  return -id;
+}
+
+async function getForumTopics(entity) {
+  const response = await telegramClient.invoke(
+    new Api.messages.GetForumTopics({ peer: entity, q: '', limit: 100, offsetId: 0, offsetDate: 0, offsetTopic: 0 }),
+  );
+  return Array.isArray(response.topics) ? response.topics : [];
+}
+
+/** User mode only: topics of a forum chat. */
+async function listTopics(chatId) {
+  if (options.asUser !== true) {
+    return null;
+  }
+  const dialogs = await getDialogs();
+  const dialog = dialogs.find((item) => `${item.entity.id}` === normalizeDialogId(chatId));
+  if (!dialog) {
+    throw new Error(`Telegram chat with ID ${chatId} not found`);
+  }
+  if (dialog.entity?.forum !== true) {
+    return [];
+  }
+  const topics = await getForumTopics(dialog.entity);
+  return topics.map((topic) => ({ topicId: topic.id, title: topic.title }));
+}
+
+async function resolveTargetAsBot(target) {
+  const entity = await telegramClient.getChat(target.chatId);
+  const title = entity.title || `${entity.first_name || ''} ${entity.last_name || ''} (${entity.username || ''})`.trim();
+  let chatType = entity.type === 'private' ? 'user' : entity.type;
+  if (chatType === 'supergroup') {
+    chatType = 'group';
+  }
+  if (target.topicId !== null && entity.is_forum !== true) {
+    log.warn(`Telegram chat "${title}" (${target.chatId}) is not a forum, topic ${target.topicId} may be ignored`);
+  }
+  return { title, entity, chatType, error: null };
+}
+
+async function resolveTargetAsUser(target) {
+  const dialogs = await getDialogs();
+  const dialog = dialogs.find((item) => `${item.entity.id}` === normalizeDialogId(target.chatId));
+  if (dialog === undefined) {
+    throw new Error(`Telegram chat with ID ${target.chatId} not found`);
+  }
+  const title = dialogTitle(dialog.entity);
+  if (target.topicId !== null) {
+    const topics = await getForumTopics(dialog.entity);
+    if (topics.length === 0) {
+      throw new Error(`No topics found in "${title}" (${target.chatId})`);
+    }
+    if (!topics.some((topic) => topic.id === target.topicId)) {
+      throw new Error(`Topic with id ${target.topicId} not found in "${title}" (${target.chatId})`);
+    }
+  }
+  return { title, entity: dialog.entity, chatType: dialogChatType(dialog), error: null };
+}
+
+/**
+ * Resolve one target of a group and remember the result for sending and for /status.
+ * @returns {Promise<object|null>} runtime info, or null when disabled or unavailable.
+ */
+async function resolveTarget(group, target) {
+  const runtimeKey = `${group}|${targetKey(target)}`;
+  telegramTargetRuntime.delete(runtimeKey);
+  if (!target.enabled) {
+    return null;
+  }
+  try {
+    const info = options.asUser === true ? await resolveTargetAsUser(target) : await resolveTargetAsBot(target);
+    telegramTargetRuntime.set(runtimeKey, info);
+    log.debug(`Telegram target "${info.title}" (${targetKey(target)}) for group ${group} resolved as ${info.chatType}`);
+    return info;
+  } catch (error) {
+    const message = String(error?.message || error);
+    telegramTargetRuntime.set(runtimeKey, { title: null, entity: null, chatType: null, error: message });
+    log.warn(`Telegram target ${targetKey(target)} for group ${group} is not available: ${message}`);
+    return null;
+  }
+}
+
+async function resolveGroupTargets(group) {
+  const targets = settings.listTargets(group);
+  for (const [key] of telegramTargetRuntime) {
+    if (key.startsWith(`${group}|`) && !targets.some((target) => `${group}|${targetKey(target)}` === key)) {
+      telegramTargetRuntime.delete(key);
+    }
+  }
+  if (targets.length === 0) {
+    log.warn(`No Telegram targets configured for group ${group}! No notification will be sent!`);
+  }
+  for (const target of targets) {
+    await resolveTarget(group, target);
+  }
+}
+
+async function telegramSendMessage(target, info, messageText) {
+  if (telegramClient === null) {
     throw new Error('Telegram client is not ready!');
   }
-  const telegramTargetTitle = telegramTargetTitles[group];
-  const groupConfig = settings.getGroup(group);
-  const telegramTopicId = groupConfig?.telegramTopicId || 0;
   let message;
   if (options.asUser === true) {
     const telegramMessage = { message: messageText };
-    if (telegramTopicId > 0) {
-      telegramMessage.replyTo = telegramTopicId;
+    if (target.topicId !== null) {
+      telegramMessage.replyTo = target.topicId;
     }
-    message = await telegramClient.sendMessage(telegramTargetEntities[group], telegramMessage);
+    message = await telegramClient.sendMessage(info.entity, telegramMessage);
   } else {
     const messageOptions = { parse_mode: telegramParseMode };
-    if (telegramTopicId > 0) {
-      messageOptions.message_thread_id = telegramTopicId;
+    if (target.topicId !== null) {
+      messageOptions.message_thread_id = target.topicId;
     }
-    message = await telegramClient.sendMessage(groupConfig.telegramChatId, messageText, messageOptions);
+    message = await telegramClient.sendMessage(target.chatId, messageText, messageOptions);
   }
   const messageId = options.asUser === true ? message.id : message.message_id;
-  log.debug(`Telegram message sent to "${telegramTargetTitle}" with topic ${telegramTopicId} with messageId: ${messageId}`);
+  log.debug(`Telegram message sent to "${info.title}" (${targetKey(target)}) with messageId: ${messageId}`);
   return messageId;
 }
 
-async function telegramPinMessage(group, messageId) {
-  const target = telegramTargetEntities[group];
-  if (telegramClient === null || target === undefined) {
-    throw new Error('Telegram client is not ready!');
-  }
+async function telegramPinMessage(target, info, messageId) {
   if (options.asUser === true) {
-    await telegramClient.pinMessage(target, messageId);
+    await telegramClient.pinMessage(info.entity, messageId);
   } else {
-    await telegramClient.pinChatMessage(settings.getGroup(group).telegramChatId, messageId);
+    await telegramClient.pinChatMessage(target.chatId, messageId);
   }
 }
 
-async function telegramUnpinMessage(group, messageId) {
-  const target = telegramTargetEntities[group];
-  if (telegramClient === null || target === undefined) {
-    throw new Error('Telegram client is not ready!');
-  }
+async function telegramUnpinMessage(target, info, messageId) {
   if (options.asUser === true) {
-    await telegramClient.unpinMessage(target, messageId);
+    await telegramClient.unpinMessage(info.entity, messageId);
   } else {
-    await telegramClient.unpinChatMessage(settings.getGroup(group).telegramChatId, messageId);
+    await telegramClient.unpinChatMessage(target.chatId, messageId);
   }
 }
 
@@ -1054,7 +1157,17 @@ function buildGroupStatus(groupId) {
   return {
     id: groupId,
     ...group,
-    chatTitle: telegramTargetTitles[groupId] ?? null,
+    telegramTargets: group.telegramTargets.map((target) => {
+      const info = telegramTargetRuntime.get(`${groupId}|${targetKey(target)}`);
+      return {
+        ...target,
+        key: targetKey(target),
+        title: info?.title ?? null,
+        chatType: info?.chatType ?? null,
+        error: info?.error ?? null,
+        resolved: Boolean(info && !info.error),
+      };
+    }),
   };
 }
 
@@ -1091,31 +1204,38 @@ const managementController = {
   setGroupField: async (groupId, field, value) => {
     settings.setGroupField(groupId, field, value);
     refreshGroups();
-    if (field === 'telegramChatId' || field === 'telegramTopicId') {
-      await getTelegramTargetEntity(groupId);
-    }
     lastYasnoChecksum = null; // make the next check re-evaluate the new configuration
     return buildGroupStatus(groupId);
   },
   unsetGroupField: async (groupId, field) => {
     settings.unsetGroupField(groupId, field);
     refreshGroups();
-    if (field === 'telegramChatId') {
-      delete telegramTargetEntities[groupId];
-      delete telegramTargetTitles[groupId];
-    } else if (field === 'telegramTopicId') {
-      await getTelegramTargetEntity(groupId);
-    }
     lastYasnoChecksum = null;
     return buildGroupStatus(groupId);
   },
   removeGroup: async (groupId) => {
     settings.removeGroup(groupId);
     refreshGroups();
-    delete telegramTargetEntities[groupId];
-    delete telegramTargetTitles[groupId];
+    await resolveGroupTargets(groupId);
     lastYasnoChecksum = null;
   },
+  addTarget: async (groupId, input) => {
+    const target = settings.addTarget(groupId, input);
+    await resolveTarget(groupId, target);
+    return buildGroupStatus(groupId).telegramTargets.find((item) => item.key === targetKey(target));
+  },
+  updateTarget: async (groupId, key, patch) => {
+    const target = settings.updateTarget(groupId, key, patch);
+    await resolveTarget(groupId, target);
+    return buildGroupStatus(groupId).telegramTargets.find((item) => item.key === key);
+  },
+  removeTarget: async (groupId, key) => {
+    settings.removeTarget(groupId, key);
+    telegramTargetRuntime.delete(`${groupId}|${key}`);
+    return buildGroupStatus(groupId);
+  },
+  listDialogs: (type, force) => listDialogs(type, force),
+  listTopics: (chatId) => listTopics(chatId),
   setOption: async (name, value) => {
     switch (name) {
       case 'scheduleUpdateInterval': {
@@ -1207,11 +1327,7 @@ process.on('SIGTERM', gracefulExit);
   try {
     telegramClient = await getTelegramClient();
     for (const group of groups) {
-      try {
-        await getTelegramTargetEntity(group);
-      } catch (error) {
-        log.warn(`Telegram target for group ${group} is not available: ${error}`);
-      }
+      await resolveGroupTargets(group);
     }
     await startManagement();
     scheduleChecks();

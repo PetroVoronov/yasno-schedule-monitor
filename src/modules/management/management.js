@@ -5,19 +5,13 @@
  * posted are never used for management.
  **/
 
-const {normalizeGroupId, GROUP_FIELDS} = require('../config/settings');
+const {normalizeGroupId, GROUP_FIELDS, parseTargetRef, targetKey} = require('../config/settings');
 const {createTexts, escapeHtml, formatMinutes, formatDuration, FIELD_LABELS, COMMAND_DESCRIPTIONS} = require('./texts');
 const {registerMenu} = require('./menu');
 
 const FIELD_ALIASES = {
   calendar: 'calendarId',
   calendarid: 'calendarId',
-  chat: 'telegramChatId',
-  chatid: 'telegramChatId',
-  telegramchatid: 'telegramChatId',
-  topic: 'telegramTopicId',
-  topicid: 'telegramTopicId',
-  telegramtopicid: 'telegramTopicId',
   svitlobot: 'svitlobotChannelIds',
   svitlobotchannelids: 'svitlobotChannelIds',
 };
@@ -71,7 +65,7 @@ function resolveField(value) {
  */
 function createManagementBot({bot, controller, i18n, logger, timeZone = 'Europe/Kiev'}) {
   const texts = createTexts({controller, i18n, timeZone});
-  const {__, yesNo, helpText, formatGroup, statusText, scheduleText, whoamiText, adminsText, statusesText} = texts;
+  const {__, yesNo, helpText, formatGroup, formatTarget, statusText, scheduleText, whoamiText, adminsText, statusesText} = texts;
 
   const isAdmin = (userId) => controller.getAdminIds().includes(userId);
 
@@ -167,9 +161,40 @@ function createManagementBot({bot, controller, i18n, logger, timeZone = 'Europe/
     await reply(ctx, groups.map(formatGroup).join('\n\n'));
   });
 
+  async function handleTargetCommand(ctx, groupId, args) {
+    const usage = __('Usage: /group <id> target add <chatId>[/<topicId>] [label] | target remove|enable|disable <chatId>[/<topicId>]');
+    const [action, rawRef, ...rest] = args;
+    const ref = parseTargetRef(rawRef);
+    if (!['add', 'remove', 'enable', 'disable'].includes(String(action).toLowerCase()) || ref === null) {
+      await reply(ctx, escapeHtml(usage));
+      return;
+    }
+    const key = targetKey(ref);
+    try {
+      switch (action.toLowerCase()) {
+        case 'add': {
+          const target = await controller.addTarget(groupId, {...ref, label: rest.join(' ')});
+          await reply(ctx, `✅ ${escapeHtml(__('Target added.'))}\n${formatTarget(target)}`);
+          break;
+        }
+        case 'remove': {
+          const group = await controller.removeTarget(groupId, key);
+          await reply(ctx, `✅ ${escapeHtml(__('Target removed.'))}\n\n${formatGroup(group)}`);
+          break;
+        }
+        default: {
+          const target = await controller.updateTarget(groupId, key, {enabled: action.toLowerCase() === 'enable'});
+          await reply(ctx, `✅ ${formatTarget(target)}`);
+        }
+      }
+    } catch (error) {
+      await reply(ctx, `⚠️ ${escapeHtml(error.message)}`);
+    }
+  }
+
   priv.command('group', async (ctx) => {
     const [rawGroup, action, rawField, ...rest] = splitArgs(ctx.match);
-    const usage = __('Usage: /group <id> | /group <id> set <field> <value> | /group <id> unset <field>');
+    const usage = __('Usage: /group <id> | /group <id> set <field> <value> | /group <id> unset <field> | /group <id> target …');
     if (!rawGroup) {
       await reply(ctx, escapeHtml(usage));
       return;
@@ -182,6 +207,15 @@ function createManagementBot({bot, controller, i18n, logger, timeZone = 'Europe/
     if (!action) {
       const group = controller.getStatus().groups.find((item) => item.id === groupId);
       await reply(ctx, group ? formatGroup(group) : escapeHtml(__('Group {group} is not configured.', {group: groupId})));
+      return;
+    }
+    if (['target', 'targets'].includes(action.toLowerCase())) {
+      if (rawField === undefined) {
+        const group = controller.getGroup(groupId);
+        await reply(ctx, formatGroup(group));
+        return;
+      }
+      await handleTargetCommand(ctx, groupId, [rawField, ...rest]);
       return;
     }
     const field = resolveField(rawField);
