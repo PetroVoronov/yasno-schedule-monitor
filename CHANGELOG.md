@@ -2,7 +2,6 @@
 
 ## [1.0.1](https://github.com/PetroVoronov/yasno-schedule-monitor/compare/v1.0.0...v1.0.1) (2026-10-25)
 
-
 ### Bug Fixes
 
 * **docker:** stop upgrading npm to latest inside the image ([095744f](https://github.com/PetroVoronov/yasno-schedule-monitor/commit/095744f6e3d853fe1b329ffbe029595a03c43a3f))
